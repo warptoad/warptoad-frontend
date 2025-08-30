@@ -1,0 +1,5 @@
+export const mockResponse = [
+    { "id": "0xaa14de1736dd91c90fce55cc1ee99abf09d1be23-1", "tokenA": "0xf41f201ced6b3a742db56062e279702c04f5cf52", "tokenB": "0xb1488f753521c58f2ddfaf99b503c48aa14dfabe", "pair": "0xaa14de1736dd91c90fce55cc1ee99abf09d1be23", "index": "1", "blockNumber": "12537431", "createdAt": 1755299840 },
+    { "id": "0x016a9ed29d6a6c5438a9bf4b0f4aa43f3fb942f4-2", "tokenA": "0x0000000000000000000000000000000000000000", "tokenB": "0xb1488f753521c58f2ddfaf99b503c48aa14dfabe", "pair": "0x016a9ed29d6a6c5438a9bf4b0f4aa43f3fb942f4", "index": "2", "blockNumber": "12538089", "createdAt": 1755301593 },
+    { "id": "0x96b54e576955f69e98b97fd24a14578667cffb91-3", "tokenA": "0xf41f201ced6b3a742db56062e279702c04f5cf52", "tokenB": "0x0000000000000000000000000000000000000000", "pair": "0x96b54e576955f69e98b97fd24a14578667cffb91", "index": "3", "blockNumber": "12538092", "createdAt": 1755301603 }
+];

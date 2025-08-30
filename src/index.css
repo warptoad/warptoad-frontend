@@ -1,8 +1,135 @@
 @import "tailwindcss";
 @plugin "daisyui";
 
-body {
-  margin: 0;
-  background-color: #1f1f1f;
+@plugin "daisyui/theme" {
+  name: "OCBashoDark";
+  default: false;
+  prefersdark: true;
+  color-scheme: "dark";
+  --color-base-100: #cedbca;
+  --color-base-200: #292929;
+  --color-base-300: #292929;
+  --color-base-content: #ebf1e5;
+  --color-primary: #cedbca;
+  --color-primary-content: #ebf1e5;
+  --color-secondary: #ebf1e5;
+  --color-secondary-content: #292929;
+  --color-accent: #b3a58d;
+  --color-accent-content: #292929;
+  --color-neutral: #ebf1e5;
+  --color-neutral-content: #292929;
+  --color-info: #7d8f99;
+  --color-info-content: #ebf1e5;
+  --color-success: #7ea172;
+  --color-success-content: #ebf1e5;
+  --color-warning: #c8a96a;
+  --color-warning-content: #ebf1e5;
+  --color-error: #b87a7a;
+  --color-error-content: #ebf1e5;
+  --radius-selector: 2rem;
+  --radius-field: 2rem;
+  --radius-box: 2rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1.5px;
+  --depth: 0;
+  --noise: 0;
 }
 
+@plugin "daisyui/theme" {
+  name: "OCBashoLight";
+  default: false;
+  prefersdark: false;
+  color-scheme: "dark";
+  --color-base-100: #cedbca;
+  --color-base-200: #ebf1e5;
+  --color-base-300: #ebf1e5;
+  --color-base-content: #292929;
+  --color-primary: #cedbca;
+  --color-primary-content: #292929;
+  --color-secondary: #292929;
+  --color-secondary-content: #ebf1e5;
+  --color-accent: #b3a58d;
+  --color-accent-content: #ebf1e5;
+  --color-neutral: #292929;
+  --color-neutral-content: #ebf1e5;
+  --color-info: #7d8f99;
+  --color-info-content: #292929;
+  --color-success: #7ea172;
+  --color-success-content: #292929;
+  --color-warning: #c8a96a;
+  --color-warning-content: #292929;
+  --color-error: #b87a7a;
+  --color-error-content: #292929;
+  --radius-selector: 2rem;
+  --radius-field: 2rem;
+  --radius-box: 2rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1.5px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Air.otf') format('opentype');
+  font-weight: 100;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Thin.otf') format('opentype');
+  font-weight: 200;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'AeonikFono';
+  src: url('./assets/fonts/AeonikFono-Black.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'pressstart';
+  src: url('/src/assets/fonts/PressStart2P-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+html {
+  font-family: 'AeonikFono', sans-serif;
+}
+#root {
+  height: 100vh;
+}
