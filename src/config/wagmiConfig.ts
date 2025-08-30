@@ -1,13 +1,16 @@
 import { createConfig, http } from "wagmi";
 //@ts-ignore
-import { abstractTestnet, abstract } from "viem/chains"; // Use abstract for mainnet
-import { abstractWalletConnector } from "@abstract-foundation/agw-react/connectors";
+import { scrollSepolia } from "viem/chains";
+import { metaMask, walletConnect } from "wagmi/connectors";
 
 export const config = createConfig({
-  connectors: [abstractWalletConnector()],
-  chains: [abstract],
+  connectors: [walletConnect({
+      projectId: '4e4329647f66007b45466407bb1db216',
+      showQrModal: false,
+    }),],
+  chains: [scrollSepolia],
   transports: {
-    [abstract.id]: http(),
+    [scrollSepolia.id]: http(),
   },
   ssr: true,
 });
