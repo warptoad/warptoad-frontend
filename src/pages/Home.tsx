@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { isAddress, getAddress, erc20Abi, erc721Abi, formatEther, formatUnits, parseEther, parseEventLogs } from "viem";
+//@ts-ignore
 import { getBalance, readContract, waitForTransactionReceipt, writeContract } from "@wagmi/core";
 import { testNFT } from "../components/Admin/Test/TestOCBMockConfig";
 import { pairContractAbi } from "../abis/PairContractAbi";
@@ -8,6 +9,29 @@ import { config } from "../config/wagmiConfig";
 import { CustomConnectKitButton } from "../components/CustomConnectKitButton";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
+
+type ChainInfo = {
+    chainType: "EVM" | "AZTEC";
+    chainName: "SCROLL" | "AZTEC";
+    chainId: "534351" | "aztec:11155111" | "aztec:31337";  //534351 scroll | "aztec:11155111" aztec testnet | "aztec:31337" - sandbox
+}
+
+type TokenInfo = {
+    tokenAddress: string;
+    tokenSymbol: string;
+    tokenName: string;
+}
+
+type TokenPick = {
+    chain: ChainInfo;
+    token: TokenInfo;
+}
+
+type TokenSelection = {
+    chain: ChainInfo;
+    chainTokens: TokenInfo[];
+};
+
 
 type tokenInfo = {
     tokenAddress: string;
@@ -71,6 +95,38 @@ const deadLineTimes: timeObject[] = [
 
 //need to check if token OFFER is approved for amount, if not start approve MODAL
 
+const mockFetchData: TokenSelection[] = [
+    {
+        chain: {
+            chainId: "534351",
+            chainType: "EVM",
+            chainName: "SCROLL",
+        },
+        chainTokens: [
+            {
+                tokenAddress: "",
+                tokenName: "USD Coin",
+                tokenSymbol: "USDC",
+            }
+        ]
+    },
+    {
+        chain: {
+            chainId: "aztec:11155111",
+            chainType: "AZTEC",
+            chainName: "AZTEC",
+        },
+        chainTokens: [
+            {
+                tokenAddress: "",
+                tokenName: "USD Coin",
+                tokenSymbol: "USDC",
+            }
+        ]
+    }
+]
+
+
 
 function Home() {
     const { address: userAddress, isConnected } = useAccount();
@@ -78,6 +134,20 @@ function Home() {
     const tokenSelection = useRef<HTMLDialogElement>(null);
     const [createdSlug, setCreatedSlug] = useState<string | null>(null);
     const [createOk, setCreateOk] = useState(false);
+
+
+    const [originChainPick, setOriginChainPick] = useState<ChainInfo | null>(null);
+    const [originTokenPick, setOriginTokenPick] = useState<TokenInfo | null>(null);
+    const [destinationSelection, setDestinationSelection] = useState<TokenSelection | null>(null);
+
+
+    const [originTokenSelection, setOriginTokenSelection] = useState<TokenInfo[] | null>(null);
+
+
+
+
+
+
 
     const [allTokens, setAllTokens] = useState<tokenInfo[]>([])
     const [tokenABalance, setTokenABalance] = useState(0);
@@ -359,26 +429,6 @@ function Home() {
 
     }
 
-    async function handleSelectRequestToken(connectedTokenAddress: string) {
-
-        const ccurrentConnectedTokenInfo = allTokens.filter((v) => v.tokenAddress === connectedTokenAddress);
-        if (!ccurrentConnectedTokenInfo[0]) {
-            return
-        }
-
-
-        setTokenBInfo(ccurrentConnectedTokenInfo[0]);
-
-        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
-        dialog?.close();
-
-    }
-
-    const handleRecipientChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value.trim();
-        setOfferRecipient(value);
-    };
-
     const isValidRecipient =
         offerRecipient !== "" &&
         isAddress(offerRecipient) &&
@@ -400,26 +450,54 @@ function Home() {
                             <div className="md:w-1/3 border rounded-2xl flex flex-col items-center p-2 gap-2">
                                 <div className="flex w-full justify-around gap-2 flex-grow flex-col relative">
                                     <div className="border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
-                                        <div className="flex gap-2 items-center">
+                                        <div className="flex gap-2 items-center justify-between">
                                             <p className="font-black">
-                                                I offer
+                                                Origin
                                             </p>
+                                            <button
+                                                onClick={() => {
+
+                                                }}
+                                                className="btn btn-secondary btn-outline btn-xs font-bold flex items-center px-2">
+                                                <p>address</p>
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="1rem"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    className="lucide lucide-chevron-down-icon lucide-chevron-down"
+                                                >
+                                                    <path d="m6 9 6 6 6-6" />
+                                                </svg>
+                                            </button>
                                         </div>
                                         <div className="flex gap-2 items-center">
                                             <input type="text" inputMode="decimal" placeholder="0" value={tokenAInputRaw} onChange={handleTokenAInputChange} className="font-bold input input-xl input-secondary bg-base-200 w-full border-0  focus:outline-0 focus-within:outline-0  focus-visible:outline-0  rounded text-4xl " />
-                                            {tokenAInfo ? (
+                                            {originChainPick && originTokenPick ? (
+
+
                                                 <button
                                                     onClick={() => {
                                                         const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
-                                                    className="btn btn-secondary btn-outline font-bold flex items-center p-1">
-                                                    <img
-                                                        src={"https://cdn.jsdelivr.net/gh/abashoverse/abasho-otc-tokens/" + import.meta.env.VITE_TOKEN_URL + `/${tokenAInfo.tokenAddress}.webp`}
-                                                        alt="avatar"
-                                                        className="w-8 h-8 rounded-full object-cover border"
-                                                    />
-                                                    <p>{tokenAInfo!.tokenTicker}</p>
+                                                    className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
+                                                    <div className="w-8 h-8 relative">
+                                                        <img
+                                                            src={`/tokens/${originTokenPick?.tokenSymbol.toLowerCase()}.png`}
+                                                            alt="avatar"
+                                                            className="rounded-full object-cover border"
+                                                        />
+                                                        <img src={`/chains/${originChainPick?.chainName.toLowerCase()}.png`} alt="" className="w-2/5 absolute bottom-0 right-0" />
+                                                    </div>
+                                                    <div className="flex flex-col text-start">
+                                                        <p className="text-xs font-black">{originTokenPick?.tokenSymbol}</p>
+                                                        <p className="text-xs font-medium">{originChainPick?.chainName.toLowerCase()}</p>
+                                                    </div>
                                                     <svg
                                                         xmlns="http://www.w3.org/2000/svg"
                                                         width="1rem"
@@ -434,14 +512,16 @@ function Home() {
                                                         <path d="m6 9 6 6 6-6" />
                                                     </svg>
                                                 </button>
+
                                             ) : (
+
                                                 <button
                                                     onClick={() => {
                                                         const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
-                                                    className="btn btn-secondary btn-outline font-bold flex items-center px-2">
-                                                    <p>Select</p>
+                                                    className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
+                                                    <p className="pl-2">Select</p>
                                                     <svg
                                                         xmlns="http://www.w3.org/2000/svg"
                                                         width="1rem"
@@ -470,22 +550,63 @@ function Home() {
                                         <svg xmlns="http://www.w3.org/2000/svg" width="1.5rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevrons-down-icon lucide-chevrons-down"><path d="m7 6 5 5 5-5" /><path d="m7 13 5 5 5-5" /></svg>
                                     </button>
                                     <div className="border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
-                                        <div className="flex gap-2 items-center">
+                                        <div className="flex gap-2 items-center justify-between">
                                             <p className="font-black">
-                                                In return for
+                                                Destination
                                             </p>
+                                            <button
+                                                onClick={() => {
+
+                                                }}
+                                                className="btn btn-secondary btn-outline btn-xs font-bold flex items-center px-2">
+                                                <p>address</p>
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    width="1rem"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    className="lucide lucide-chevron-down-icon lucide-chevron-down"
+                                                >
+                                                    <path d="m6 9 6 6 6-6" />
+                                                </svg>
+                                            </button>
                                         </div>
                                         <div className="flex gap-2 items-center">
                                             <input type="text" inputMode="decimal" placeholder="0" value={tokenBInputRaw} onChange={handleTokenBInputChange} className="font-bold input input-xl input-secondary bg-base-200 w-full border-0  focus:outline-0 focus-within:outline-0  focus-visible:outline-0  rounded text-4xl " />
 
                                             {tokenBInfo ? (
-                                                <button className="cursor-default btn btn-secondary btn-outline font-bold flex items-center p-1 pr-2">
+                                                <button
+                                                    onClick={() => {
+                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                        dialog?.showModal();
+                                                    }}
+                                                    className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
                                                     <img
-                                                        src={"https://cdn.jsdelivr.net/gh/abashoverse/abasho-otc-tokens/" + import.meta.env.VITE_TOKEN_URL + `/${tokenBInfo.tokenAddress}.webp`}
+                                                        src={"https://assets.relay.link/icons/currencies/eth.png"}
                                                         alt="avatar"
                                                         className="w-8 h-8 rounded-full object-cover border"
                                                     />
-                                                    <p>{tokenBInfo.tokenTicker}</p>
+                                                    <div className="flex flex-col text-start">
+                                                        <p className="text-xs font-black">ETH</p>
+                                                        <p className="text-xs font-medium">scroll</p>
+                                                    </div>
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        width="1rem"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="2"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        className="lucide lucide-chevron-down-icon lucide-chevron-down"
+                                                    >
+                                                        <path d="m6 9 6 6 6-6" />
+                                                    </svg>
                                                 </button>
                                             ) : (
                                                 <button
@@ -555,60 +676,63 @@ function Home() {
 
                                                 {/*TOKEN SELECTION*/}
                                                 <dialog id="tokenSelection" ref={tokenSelection} className="modal">
-                                                    <div className="modal-box bg-secondary rounded-md p-2 h-3/5 flex flex-col max-w-full lg:max-w-1/2">
-                                                        <h1 className="font-black text-base-200 py-2 text-center">select a token pair</h1>
-                                                        <div className="flex flex-col lg:flex-row flex-grow gap-2 h-full min-h-0">
-                                                            <div className="bg-base-200 basis-1/2 max-h-1/2 lg:max-h-full p-2 rounded flex flex-col gap-2">
-                                                                <div className="rounded p-2 border overflow-y-auto min-h-[100%] max-h-[10] flex flex-col gap-2">
-                                                                    <h1 className="font-black text-center w-fit rounded-full p-1 px-2 bg-secondary text-base-200">offer</h1>
-                                                                    {allTokens.map((tokenInfo) => (
-                                                                        <button key={tokenInfo.tokenAddress}
-                                                                            onClick={() => handleClick(tokenInfo)}
-                                                                            className={`btn border rounded-full p-1 pl-2 flex items-center justify-between ${activeToken === tokenInfo.tokenAddress
-                                                                                ? "btn-secondary" // active style
-                                                                                : "btn-secondary btn-outline" // default style
-                                                                                }`}
-                                                                        >
-                                                                            <p className="text-2xl font-black">
-                                                                                {tokenInfo.tokenTicker}
-                                                                            </p>
-                                                                            <img
-                                                                                src={"https://cdn.jsdelivr.net/gh/abashoverse/abasho-otc-tokens/" + import.meta.env.VITE_TOKEN_URL + `/${tokenInfo.tokenAddress}.webp`}
-                                                                                alt="avatar"
-                                                                                className="h-full rounded-full object-cover border"
-                                                                            />
+                                                    <div className="modal-box bg-base-200 border rounded-xl p-2 h-3/5 flex flex-col gap-2 max-w-full lg:max-w-1/2">
+                                                        <div className="flex justify-between">
+                                                            <h3 className="font-black text-lg">Select Token</h3>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                                    dialog?.close();
+                                                                }}
+                                                                className="btn btn-secondary btn-outline btn-xs">close</button>
+                                                        </div>
+                                                        <div className="flex flex-grow gap-2">
+                                                            <div className="border basis-1/3 p-2 rounded-xl flex flex-col">
+                                                                <p className="font-black pb-2">Chain</p>
+                                                                <div className="flex flex-col flex-grow gap-2">
+                                                                    {mockFetchData.map((item) => (
+                                                                        <button
+                                                                            key={item.chain.chainName}
+                                                                            onClick={() => {
+                                                                                setOriginTokenSelection(item.chainTokens);
+                                                                                setOriginChainPick(item.chain);
+                                                                            }}
+                                                                            className={`btn btn-primary ${item.chain.chainName == originChainPick?.chainName ? "" : "btn-ghost"} h-fit w-full p-2 flex justify-start items-center gap-2 rounded`}>
+                                                                            <img src={`/chains/${item.chain.chainName.toLowerCase()}.png`} alt={`${item.chain.chainName} Logo`} className="w-8 h-8 aspect-square" />
+                                                                            <p>{item.chain.chainName}</p>
                                                                         </button>
                                                                     ))}
                                                                 </div>
                                                             </div>
-                                                            <div className="bg-base-200 basis-1/2 max-h-1/2 lg:max-h-full p-2 rounded flex flex-col gap-2">
-                                                                {/*<input type="text" placeholder="search" value={offerRecipient} onChange={handleRecipientChange} className="input input-secondary bg-base-200 rounded" />*/}
-                                                                <div className="rounded p-2 border overflow-y-auto min-h-[100%] flex flex-col gap-2">
-                                                                    <h1 className="font-black text-center w-fit rounded-full p-1 px-2 bg-secondary text-base-200">request</h1>
-                                                                    {Array.isArray(connectedTokenInfo) && connectedTokenInfo.length > 0 ? (
-                                                                        connectedTokenInfo!.map((item) => (
-                                                                            <button
-                                                                                onClick={async () => {
-                                                                                    handleSelectRequestToken(item.connectedTokenAddress)
-                                                                                    setTokenPairAddress(item.tokenPairAddress)
-                                                                                    setIsSwapped(!item.connectedTokenIsOffer)
-                                                                                }}
-                                                                                key={item.tokenPairAddress} // or another stable id
-                                                                                className="btn btn-secondary btn-outline border rounded-full p-1 pl-2 flex items-center justify-between"
-                                                                            >
-                                                                                <p className="text-2xl font-black">
-                                                                                    {item.connectedTokenTicker ?? '—'}
-                                                                                </p>
-                                                                                <img
-                                                                                    src={"https://cdn.jsdelivr.net/gh/abashoverse/abasho-otc-tokens/" + import.meta.env.VITE_TOKEN_URL + `/${item.connectedTokenAddress}.webp`}
-                                                                                    alt="token"
-                                                                                    className="h-full rounded-full object-cover border"
-                                                                                />
-                                                                            </button>
-                                                                        ))
-                                                                    ) : (
-                                                                        <p className="text-center">select a token to offer first</p>
-                                                                    )}
+                                                            <div className="border flex-grow p-2 rounded-xl flex flex-col">
+                                                                <p className="font-black">Token</p>
+                                                                <div className="flex flex-col flex-grow gap-2">
+                                                                    {
+                                                                        (originTokenSelection && originChainPick) ? (
+
+                                                                            originTokenSelection.map((token) => (
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        setOriginTokenPick(token);
+                                                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                                                        dialog?.close();
+                                                                                    }}
+                                                                                    key={token.tokenName}
+                                                                                    className="btn btn-primary btn-ghost h-fit w-full p-2 flex justify-start items-center gap-2 rounded">
+                                                                                    <div className="relative w-8 h-8 aspect-square">
+                                                                                        <img src={`/tokens/${token.tokenSymbol.toLowerCase()}.png`} alt="token Logo" className="" />
+                                                                                        <img src={`/chains/${originChainPick.chainName.toLowerCase()}.png`} alt="" className="absolute w-2/5 bottom-0 right-0" />
+                                                                                    </div>
+                                                                                    <div className="flex flex-col items-start ">
+                                                                                        <p className="text-md font-bold">{token.tokenSymbol}</p>
+                                                                                        <p className="text-xs font-normal">{token.tokenName}</p>
+                                                                                    </div>
+                                                                                </button>
+                                                                            ))
+                                                                        ) : (
+                                                                            <p>select a chain</p>
+                                                                        )
+                                                                    }
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -622,59 +746,7 @@ function Home() {
                                     </div>
                                 </div>
 
-                                <div className="w-full flex justify-between items-center gap-2">
-                                    <input type="text" placeholder="recipient" disabled={!isPrivateOffer} value={offerRecipient} onChange={handleRecipientChange} className="input input-secondary bg-base-200 disabled:bg-secondary flex-grow transition-colors duration-400" />
-                                    <div className="flex gap-2 p-2 border rounded-4xl">
-                                        <input
-                                            type="checkbox"
-                                            className="toggle border text-secondary checked:bg-secondary checked:text-base-200"
-                                            onChange={() => { setIsPrivateOffer(!isPrivateOffer) }}
-                                        />
-                                        <p className="font-medium">private</p>
-                                    </div>
-                                </div>
-
                                 <div className="w-full gap-2 flex">
-                                    <details className="dropdown dropdown-top w-4/12">
-                                        <summary className="btn btn-secondary btn-outline flex gap-2 p-2 rounded-4xl">
-                                            <p>{deadLineTimes.filter((x) => x.seconds === offerDeadline)[0].title}</p>
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                width="1rem"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="2"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                className="lucide lucide-chevron-down-icon lucide-chevron-down"
-                                            >
-                                                <path d="m6 9 6 6 6-6" />
-                                            </svg>
-                                        </summary>
-                                        <ul className="menu dropdown-content bg-base-200 border rounded-2xl z-1 p-2 w-full flex gap-2">
-                                            {deadLineTimes
-                                                .map((deadline) => (
-                                                    <li key={deadline.seconds}>
-                                                        <button
-                                                            className={
-                                                                offerDeadline === deadline.seconds
-                                                                    ? "btn btn-secondary"
-                                                                    : "btn btn-secondary btn-outline"
-                                                            }
-                                                            onClick={(e) => {
-                                                                setOfferDeadline(deadline.seconds);;
-                                                                (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
-                                                            }}
-                                                        >
-                                                            {deadline.title}
-                                                        </button>
-                                                    </li>
-                                                ))
-                                                .reverse()}
-                                        </ul>
-                                    </details>
-
                                     {allowanceSet ? (
                                         <button onClick={handleCreateOffer} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0 || tokenBInput <= 0}>
                                             Create Offer

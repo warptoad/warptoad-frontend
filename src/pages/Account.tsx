@@ -1,7 +1,6 @@
 
 import { useAccount } from "wagmi";
 import { CustomConnectKitButton } from "../components/CustomConnectKitButton";
-import { AzguardClient } from "@azguardwallet/client";
 import AzguardWallet from "../components/Aztec/AzguardWallet";
 
 
