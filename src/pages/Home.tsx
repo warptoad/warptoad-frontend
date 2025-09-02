@@ -55,43 +55,6 @@ type currentOfferPayload = {
     privateTaker: string | null;
 }
 
-type timeObject = {
-    seconds: number;
-    title: string;
-}
-
-const oneHourInSeconds = 3600;
-
-const deadLineTimes: timeObject[] = [
-    {
-        seconds: oneHourInSeconds,
-        title: "1 hour"
-    },
-    {
-        seconds: oneHourInSeconds * 3,
-        title: "3 hours"
-    },
-    {
-        seconds: oneHourInSeconds * 12,
-        title: "12 hours"
-    },
-    {
-        seconds: oneHourInSeconds * 24,
-        title: "1 day"
-    },
-    {
-        seconds: oneHourInSeconds * 24 * 3,
-        title: "3 days"
-    },
-    {
-        seconds: oneHourInSeconds * 24 * 7,
-        title: "1 week"
-    },
-    {
-        seconds: oneHourInSeconds * 24 * 7 * 4,
-        title: "1 month"
-    },
-]
 
 //need to check if token OFFER is approved for amount, if not start approve MODAL
 
@@ -131,16 +94,21 @@ const mockFetchData: TokenSelection[] = [
 function Home() {
     const { address: userAddress, isConnected } = useAccount();
     const feeInfo = useRef<HTMLDialogElement>(null);
-    const tokenSelection = useRef<HTMLDialogElement>(null);
+    const originSelectionModal = useRef<HTMLDialogElement>(null);
+    const destinationSelectionModal = useRef<HTMLDialogElement>(null);
     const [createdSlug, setCreatedSlug] = useState<string | null>(null);
     const [createOk, setCreateOk] = useState(false);
 
 
     const [originChainPick, setOriginChainPick] = useState<ChainInfo | null>(null);
     const [originTokenPick, setOriginTokenPick] = useState<TokenInfo | null>(null);
-    const [destinationSelection, setDestinationSelection] = useState<TokenSelection | null>(null);
+
+    const [destinationChainPick, setDestinationChainPick] = useState<ChainInfo | null>(null);
+    const [destinationTokenPick, setDestinationTokenPick] = useState<TokenInfo | null>(null);
 
 
+
+    const [destinationSelection, setDestinationSelection] = useState<TokenInfo[] | null>(null);
     const [originTokenSelection, setOriginTokenSelection] = useState<TokenInfo[] | null>(null);
 
 
@@ -164,10 +132,31 @@ function Home() {
     const [isPrivateOffer, setIsPrivateOffer] = useState(false);
     const [offerRecipient, setOfferRecipient] = useState("");
     const [activeToken, setActiveToken] = useState<string | null>(null);
-    const [offerDeadline, setOfferDeadline] = useState(oneHourInSeconds * 24)
     const [allowanceSet, setAllowanceSet] = useState(false);
 
     const [isSwapped, setIsSwapped] = useState(false);
+
+
+    function showRemainingChainsForDestination(){
+        
+        if(originChainPick){
+            const filtered = mockFetchData.filter(
+            (selection) => selection.chain.chainId !== originChainPick.chainId);
+            return filtered
+        }
+
+        return mockFetchData
+    }
+
+    function showRemainingChainsForOrigin(){
+        if(destinationChainPick){
+            const filtered = mockFetchData.filter(
+            (selection) => selection.chain.chainId !== destinationChainPick.chainId);
+            return filtered
+        }
+
+        return mockFetchData
+    }
 
 
     async function checkAllowance() {
@@ -214,7 +203,7 @@ function Home() {
             amountRequested: Number(parsedRequestAmount),
             tokenPairAddress,
             swapDirection: isSwapped,
-            deadline: Math.floor(Date.now() / 1000) + offerDeadline,
+            deadline: 1000,
             privateTaker: (offerRecipient === ZERO_ADDR || offerRecipient === "") ? ZERO_ADDR : offerRecipient
         }
 
@@ -482,7 +471,7 @@ function Home() {
 
                                                 <button
                                                     onClick={() => {
-                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                        const dialog = document.getElementById("originSelectionModal") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
                                                     className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
@@ -517,7 +506,7 @@ function Home() {
 
                                                 <button
                                                     onClick={() => {
-                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                        const dialog = document.getElementById("originSelectionModal") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
                                                     className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
@@ -578,21 +567,24 @@ function Home() {
                                         <div className="flex gap-2 items-center">
                                             <input type="text" inputMode="decimal" placeholder="0" value={tokenBInputRaw} onChange={handleTokenBInputChange} className="font-bold input input-xl input-secondary bg-base-200 w-full border-0  focus:outline-0 focus-within:outline-0  focus-visible:outline-0  rounded text-4xl " />
 
-                                            {tokenBInfo ? (
+                                            {destinationChainPick ? (
                                                 <button
                                                     onClick={() => {
-                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                        const dialog = document.getElementById("destinationSelectionModal") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
                                                     className="btn btn-secondary btn-outline font-bold flex items-center justify-start p-1">
-                                                    <img
-                                                        src={"https://assets.relay.link/icons/currencies/eth.png"}
-                                                        alt="avatar"
-                                                        className="w-8 h-8 rounded-full object-cover border"
-                                                    />
+                                                    <div className="w-8 h-8 relative">
+                                                        <img
+                                                            src={`/tokens/${originTokenPick?.tokenSymbol.toLowerCase()}.png`}
+                                                            alt="avatar"
+                                                            className="rounded-full object-cover border"
+                                                        />
+                                                        <img src={`/chains/${destinationChainPick?.chainName.toLowerCase()}.png`} alt="" className="w-2/5 absolute bottom-0 right-0" />
+                                                    </div>
                                                     <div className="flex flex-col text-start">
-                                                        <p className="text-xs font-black">ETH</p>
-                                                        <p className="text-xs font-medium">scroll</p>
+                                                        <p className="text-xs font-black">{destinationTokenPick?.tokenSymbol}</p>
+                                                        <p className="text-xs font-medium">{destinationChainPick?.chainName.toLowerCase()}</p>
                                                     </div>
                                                     <svg
                                                         xmlns="http://www.w3.org/2000/svg"
@@ -611,9 +603,10 @@ function Home() {
                                             ) : (
                                                 <button
                                                     onClick={() => {
-                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                        const dialog = document.getElementById("destinationSelectionModal") as HTMLDialogElement | null;
                                                         dialog?.showModal();
                                                     }}
+                                                    disabled={originTokenPick === null}
                                                     className="btn btn-secondary btn-outline font-bold flex items-center px-2">
                                                     <p>Select</p>
                                                     <svg
@@ -634,54 +627,15 @@ function Home() {
                                         </div>
                                         <div className="flex justify-start pb-4 md:pb-0">
                                             <div className="flex gap-2 text-sm font-medium">
-                                                {Number(balance) >= 1 ? (
-                                                    <button
-                                                        className="btn btn-success btn-xs">
-                                                        {Number(balance) >= 3 ? ("-0.15% fee") : ("-0.2% fee")}
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        className="btn btn-secondary btn-xs"
-                                                        onClick={() => {
-                                                            const dialog = document.getElementById("feeInfo") as HTMLDialogElement | null;
-                                                            dialog?.showModal();
-                                                        }}
-                                                    >
-                                                        -0.25% fee ?
-                                                    </button>
-                                                )}
-                                                <dialog id="feeInfo" ref={feeInfo} className="modal">
-                                                    <div className="modal-box bg-base-200 border rounded-md flex flex-col gap-6">
-                                                        <div className="flex items-center justify-between">
-                                                            <h3 className="font-black text-lg">Did you know?</h3>
-                                                            <button onClick={() => {
-                                                                const dialog = document.getElementById("feeInfo") as HTMLDialogElement | null;
-                                                                dialog?.close();
-                                                            }} className="btn btn-secondary btn-outline rounded">close</button>
-                                                        </div>
-                                                        <p className="py-4 font-bold">Holding OCBs supports the Abashoverse and lowers your fee!</p>
-                                                        <div className="flex gap-4 justify-around w-full">
-                                                            <a target="_blank" href="https://opensea.io/collection/ocb" className="btn btn-secondary flex-1/2">
-                                                                View on OpenSea
-                                                            </a>
-                                                            <a target="_blank" href="https://magiceden.io/collections/abstract/0x5b720f0698547554ab1f7c127a2bda38391d1b4b" className="btn btn-secondary flex-1/2">
-                                                                View on MagicEden
-                                                            </a>
-                                                        </div>
-                                                    </div>
-                                                    <form method="dialog" className="modal-backdrop bg-base-200">
-                                                        <button>close</button>
-                                                    </form>
-                                                </dialog>
 
-                                                {/*TOKEN SELECTION*/}
-                                                <dialog id="tokenSelection" ref={tokenSelection} className="modal">
+                                                {/*Origin SELECTION*/}
+                                                <dialog id="originSelectionModal" ref={originSelectionModal} className="modal">
                                                     <div className="modal-box bg-base-200 border rounded-xl p-2 h-3/5 flex flex-col gap-2 max-w-full lg:max-w-1/2">
                                                         <div className="flex justify-between">
                                                             <h3 className="font-black text-lg">Select Token</h3>
                                                             <button
                                                                 onClick={() => {
-                                                                    const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                                    const dialog = document.getElementById("originSelectionModal") as HTMLDialogElement | null;
                                                                     dialog?.close();
                                                                 }}
                                                                 className="btn btn-secondary btn-outline btn-xs">close</button>
@@ -690,7 +644,7 @@ function Home() {
                                                             <div className="border basis-1/3 p-2 rounded-xl flex flex-col">
                                                                 <p className="font-black pb-2">Chain</p>
                                                                 <div className="flex flex-col flex-grow gap-2">
-                                                                    {mockFetchData.map((item) => (
+                                                                    {showRemainingChainsForOrigin().map((item) => (
                                                                         <button
                                                                             key={item.chain.chainName}
                                                                             onClick={() => {
@@ -714,7 +668,7 @@ function Home() {
                                                                                 <button
                                                                                     onClick={() => {
                                                                                         setOriginTokenPick(token);
-                                                                                        const dialog = document.getElementById("tokenSelection") as HTMLDialogElement | null;
+                                                                                        const dialog = document.getElementById("originSelectionModal") as HTMLDialogElement | null;
                                                                                         dialog?.close();
                                                                                     }}
                                                                                     key={token.tokenName}
@@ -733,6 +687,44 @@ function Home() {
                                                                             <p>select a chain</p>
                                                                         )
                                                                     }
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <form method="dialog" className="modal-backdrop bg-base-200">
+                                                        <button>close</button>
+                                                    </form>
+                                                </dialog>
+
+                                                {/* Destination selection */}
+                                                <dialog id="destinationSelectionModal" ref={destinationSelectionModal} className="modal">
+                                                    <div className="modal-box bg-base-200 border rounded-xl p-2 h-3/5 flex flex-col gap-2 max-w-full lg:max-w-1/2">
+                                                        <div className="flex justify-between">
+                                                            <h3 className="font-black text-lg">Select Destination</h3>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const dialog = document.getElementById("destinationSelectionModal") as HTMLDialogElement | null;
+                                                                    dialog?.close();
+                                                                }}
+                                                                className="btn btn-secondary btn-outline btn-xs">close</button>
+                                                        </div>
+                                                        <div className="flex flex-grow gap-2">
+                                                            <div className="border w-full p-2 rounded-xl flex flex-col">
+                                                                <p className="font-black pb-2">Chain</p>
+                                                                <div className="flex flex-col flex-grow gap-2">
+                                                                    {showRemainingChainsForDestination().map((item) => (
+                                                                        <button
+                                                                            key={item.chain.chainName}
+                                                                            onClick={() => {
+                                                                                setDestinationChainPick(item.chain);
+                                                                                const dialog = document.getElementById("destinationSelectionModal") as HTMLDialogElement | null;
+                                                                                dialog?.close();
+                                                                            }}
+                                                                            className={`btn btn-primary ${item.chain.chainName == destinationChainPick?.chainName ? "" : "btn-ghost"} h-fit w-full p-2 flex justify-start items-center gap-2 rounded`}>
+                                                                            <img src={`/chains/${item.chain.chainName.toLowerCase()}.png`} alt={`${item.chain.chainName} Logo`} className="w-8 h-8 aspect-square" />
+                                                                            <p>{item.chain.chainName}</p>
+                                                                        </button>
+                                                                    ))}
                                                                 </div>
                                                             </div>
                                                         </div>
