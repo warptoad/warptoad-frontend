@@ -1,6 +1,6 @@
 import { createConfig, http } from "wagmi";
 //@ts-ignore
-import { scrollSepolia } from "viem/chains";
+import { scrollSepolia, sepolia } from "viem/chains";
 import { metaMask, walletConnect } from "wagmi/connectors";
 
 export const config = createConfig({
@@ -8,9 +8,13 @@ export const config = createConfig({
       projectId: '4e4329647f66007b45466407bb1db216',
       showQrModal: false,
     }),],
-  chains: [scrollSepolia],
+  chains: [
+    sepolia, 
+    //scrollSepolia 
+  ],
   transports: {
-    [scrollSepolia.id]: http(),
+    [sepolia.id]: http(),
+    //[scrollSepolia.id]: http(),
   },
   ssr: true,
 });

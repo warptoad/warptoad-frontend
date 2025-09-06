@@ -1,19 +1,41 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { isAddress, getAddress, erc20Abi, erc721Abi, formatEther, formatUnits, parseEther, parseEventLogs } from "viem";
 //@ts-ignore
 import { getBalance, readContract, waitForTransactionReceipt, writeContract } from "@wagmi/core";
+import { useWalletClient } from 'wagmi'
+import { BrowserProvider } from 'ethers'
 import { testNFT } from "../components/Admin/Test/TestOCBMockConfig";
-import { pairContractAbi } from "../abis/PairContractAbi";
 import { config } from "../config/wagmiConfig";
 import { CustomConnectKitButton } from "../components/CustomConnectKitButton";
+import { useAzguard } from "../Context/AzguardContext";
+import l1Addresses from "../components/artifacts/chain-11155111/deployed_addresses.json";
+import l2Addresses from "../components/artifacts/chain-534351/deployed_addresses.json"
+import { abi as warptoadAbi } from "../components/artifacts/chain-11155111/artifacts/L1WarpToadModuleL1WarpToad.json";
+
+
+import { getContractAddressesAztec, getContractAddressesEvm, evmDeployments } from "warp-toad-old-backend/deployment";
+import { SEPOLIA_CHAINID, SCROLL_CHAINID_SEPOLIA } from "warp-toad-old-backend/constants";
+import { EVM_TREE_DEPTH, gasCostPerChain } from "warp-toad-old-backend/constants";
+import { hashCommitment, hashPreCommitment } from "warp-toad-old-backend/hashing";
+import { calculateFeeFactor, createProof, getMerkleData, getProofInputs } from "warp-toad-old-backend/proving";
+import { sendGigaRoot, bridgeAZTECLocalRootToL1, parseEventFromTx, updateGigaRoot, receiveGigaRootOnAztec, bridgeBetweenL1AndL2 } from "warp-toad-old-backend/bridging";
+
+import { getL1Contracts, getL2Contracts, getAztecTestWallet } from 'warp-toad-old-backend/deployment';
+import { getLocalRootProviders, getPayableGigaRootRecipients, sleep } from 'warp-toad-old-backend/bridging';
+
+import { UltraHonkBackend, UltraPlonkBackend } from "@aztec/bb.js";
+import { createPreCommitment, getChainIdAztecFromContract } from "../components/utils/depositFunctionality";
+import { AzguardClient } from "@azguardwallet/client";
+import type { SimulateViewsResult } from "@azguardwallet/types";
+
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
 
 type ChainInfo = {
     chainType: "EVM" | "AZTEC";
-    chainName: "SCROLL" | "AZTEC";
-    chainId: "534351" | "aztec:11155111" | "aztec:31337";  //534351 scroll | "aztec:11155111" aztec testnet | "aztec:31337" - sandbox
+    chainName: "Mainnet" | "SCROLL" | "AZTEC";
+    chainId: "11155111" | "534351" | "aztec:11155111" | "aztec:31337";  //534351 scroll | "aztec:11155111" aztec testnet | "aztec:31337" - sandbox
 }
 
 type TokenInfo = {
@@ -55,19 +77,45 @@ type currentOfferPayload = {
     privateTaker: string | null;
 }
 
+type DepositPayload = {
+    amount: number;
+    tokenAddress: string;
+    originChain: string;
+    destinationChain: string;
+    destinationWallet: string;
+}
+
+type DestinationWallet = {
+    chainType: "AZTEC" | "EVM";
+    address: string;
+}
+
 
 //need to check if token OFFER is approved for amount, if not start approve MODAL
 
 const mockFetchData: TokenSelection[] = [
     {
         chain: {
-            chainId: "534351",
+            chainId: "11155111", //sepolia / ?Mainnet?
+            chainType: "EVM",
+            chainName: "Mainnet",
+        },
+        chainTokens: [
+            {
+                tokenAddress: l1Addresses["TestToken#USDcoin"],
+                tokenName: "USD Coin",
+                tokenSymbol: "USDC",
+            }
+        ]
+    }, {
+        chain: {
+            chainId: "534351", //scroll
             chainType: "EVM",
             chainName: "SCROLL",
         },
         chainTokens: [
             {
-                tokenAddress: "",
+                tokenAddress: l2Addresses["L2ScrollModule#L2WarpToad"],
                 tokenName: "USD Coin",
                 tokenSymbol: "USDC",
             }
@@ -90,14 +138,24 @@ const mockFetchData: TokenSelection[] = [
 ]
 
 
+const shorten = (input?: string | null) => {
+    if (!input) return "";
+    const addr = input.includes("0x") ? input.slice(input.indexOf("0x")) : input;
+    return addr.length <= 10 ? addr : `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+};
+
 
 function Home() {
-    const { address: userAddress, isConnected } = useAccount();
-    const feeInfo = useRef<HTMLDialogElement>(null);
+    const { address: userEVMAddress, isConnected, connector } = useAccount();
+    const { address: userAztecAddress, client: azguardClient } = useAzguard();
+
     const originSelectionModal = useRef<HTMLDialogElement>(null);
     const destinationSelectionModal = useRef<HTMLDialogElement>(null);
+    const destinationAddressModal = useRef<HTMLDialogElement>(null);
     const [createdSlug, setCreatedSlug] = useState<string | null>(null);
     const [createOk, setCreateOk] = useState(false);
+
+    const [destinationWalletAddress, setDestinationWalletAddress] = useState<DestinationWallet | null>();
 
 
     const [originChainPick, setOriginChainPick] = useState<ChainInfo | null>(null);
@@ -110,12 +168,6 @@ function Home() {
 
     const [destinationSelection, setDestinationSelection] = useState<TokenInfo[] | null>(null);
     const [originTokenSelection, setOriginTokenSelection] = useState<TokenInfo[] | null>(null);
-
-
-
-
-
-
 
     const [allTokens, setAllTokens] = useState<tokenInfo[]>([])
     const [tokenABalance, setTokenABalance] = useState(0);
@@ -136,22 +188,100 @@ function Home() {
 
     const [isSwapped, setIsSwapped] = useState(false);
 
+    function displayAddressFromChainType(chainInfo: ChainInfo | null) {
 
-    function showRemainingChainsForDestination(){
+        if (!chainInfo) {
+            return "none"
+        }
+        if (chainInfo.chainType === "AZTEC") {
+            return shorten(userAztecAddress)
+        }
+        if (chainInfo.chainType === "EVM") {
+            return shorten(userEVMAddress)
+        }
+        else {
+            return "select"
+        }
+
+    }
+
+    async function handleBridgeOnL1() {
+        if (!originTokenPick) return
+        /**
+         * WRAP TOKENS
+         */
+        /*
+                const decimals = await readContract(config, {
+                    abi: erc20Abi,
+                    address: originTokenPick.tokenAddress as `0x${string}`,
+                    functionName: "decimals",
+                }) as number;
         
-        if(originChainPick){
+                const amount = BigInt(tokenAInput*10**decimals)
+        
+                const txHashWrap = await writeContract(config, {
+                    abi: warptoadAbi,
+                    address: l1Addresses["L1WarpToadModule#L1WarpToad"] as `0x${string}`,
+                    functionName: "wrap",
+                    args: [amount],
+                })
+        
+                console.log(txHashWrap);
+        */
+
+                
+        console.log(await getContractAddressesAztec(SEPOLIA_CHAINID))
+
+        if (!azguardClient) return;
+
+        const account = azguardClient.accounts[0];
+        const address = account.split(":").at(-1);
+
+        const [result] = await azguardClient.execute([
+            {
+                kind: "simulate_views",
+                account: account,
+                calls: [
+                    {
+                        kind: "call",
+                        contract: "0x06216f30183f2ab424eb87b296588e0404ce13b837c09d7e5db94d7a846a260f",
+                        method: "balance_of_public",
+                        args: [address],
+                    }
+                ],
+            },
+        ])
+        console.log(account)
+        if (result.status !== "ok") {
+            console.log("errrooooor")
+            return
+        }
+
+        const publicBalance = (result.result as SimulateViewsResult).decoded[0];
+
+        console.log(publicBalance)
+
+        //await getChainIdAztecFromContract()
+
+        //const preImg = createPreCommitment(amount, );
+
+    }
+
+    function showRemainingChainsForDestination() {
+
+        if (originChainPick) {
             const filtered = mockFetchData.filter(
-            (selection) => selection.chain.chainId !== originChainPick.chainId);
+                (selection) => selection.chain.chainId !== originChainPick.chainId);
             return filtered
         }
 
         return mockFetchData
     }
 
-    function showRemainingChainsForOrigin(){
-        if(destinationChainPick){
+    function showRemainingChainsForOrigin() {
+        if (destinationChainPick) {
             const filtered = mockFetchData.filter(
-            (selection) => selection.chain.chainId !== destinationChainPick.chainId);
+                (selection) => selection.chain.chainId !== destinationChainPick.chainId);
             return filtered
         }
 
@@ -160,32 +290,42 @@ function Home() {
 
 
     async function checkAllowance() {
-        if (!tokenAInfo || !tokenPairAddress || !userAddress) return
-
-        if (tokenAInfo.tokenAddress === ZERO_ADDR) {
-            setAllowanceSet(true)
-            return
-        }
+        if (!originTokenPick || !userEVMAddress) return
 
         const tokenAAllowance = await readContract(config, {
             abi: erc20Abi,
-            address: tokenAInfo.tokenAddress as `0x${string}`,
+            address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "allowance",
-            args: [userAddress, tokenPairAddress as `0x${string}`],
+            args: [userEVMAddress, l1Addresses["L1InfraModule#L1WarpToad"] as `0x${string}`],
         }) as bigint;
 
-        const parsedAmount = parseEther(tokenAInput.toString())
+        const decimals = await readContract(config, {
+            abi: erc20Abi,
+            address: originTokenPick.tokenAddress as `0x${string}`,
+            functionName: "decimals",
+        }) as number;
+
+        const parsedAmount = tokenAInput * 10 ** decimals;
         setAllowanceSet(tokenAAllowance >= parsedAmount)
     }
 
     async function setAllowance() {
-        if (!tokenAInfo || !tokenPairAddress || !userAddress || !tokenAInput || !tokenBInput) return
-        const parsedAmount = parseEther(tokenAInput.toString())
+        if (!originTokenPick || !userEVMAddress || !tokenAInput) return
+
+        const decimals = await readContract(config, {
+            abi: erc20Abi,
+            address: originTokenPick.tokenAddress as `0x${string}`,
+            functionName: "decimals",
+        }) as number;
+
+        const parsedAmount = tokenAInput * 10 ** decimals;
+        console.log(parsedAmount);
+
         const txHash = await writeContract(config, {
             abi: erc20Abi,
-            address: tokenAInfo.tokenAddress as `0x${string}`,
+            address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "approve",
-            args: [tokenPairAddress as `0x${string}`, parsedAmount],
+            args: [l1Addresses["L1InfraModule#L1WarpToad"] as `0x${string}`, BigInt(parsedAmount)],
         })
         await waitForTransactionReceipt(config, {
             hash: txHash,
@@ -193,77 +333,63 @@ function Home() {
         await checkAllowance()
     }
 
-    async function handleCreateOffer() {
-        if (!tokenAInfo || !tokenPairAddress || !userAddress || !tokenAInput || !tokenBInput) return
-        const parsedOfferAmount = parseEther(tokenAInput.toString());
-        const parsedRequestAmount = parseEther(tokenBInput.toString())
+    // async function handleCreateOffer() {
+    //     if (!tokenAInfo || !tokenPairAddress || !userEVMAddress || !tokenAInput || !tokenBInput) return
+    //     const parsedOfferAmount = parseEther(tokenAInput.toString());
+    //     const parsedRequestAmount = parseEther(tokenBInput.toString())
 
-        const createOfferParams: currentOfferPayload = {
-            amountOffered: Number(parsedOfferAmount),
-            amountRequested: Number(parsedRequestAmount),
-            tokenPairAddress,
-            swapDirection: isSwapped,
-            deadline: 1000,
-            privateTaker: (offerRecipient === ZERO_ADDR || offerRecipient === "") ? ZERO_ADDR : offerRecipient
-        }
+    //     const createOfferParams: currentOfferPayload = {
+    //         amountOffered: Number(parsedOfferAmount),
+    //         amountRequested: Number(parsedRequestAmount),
+    //         tokenPairAddress,
+    //         swapDirection: isSwapped,
+    //         deadline: 1000,
+    //         privateTaker: (offerRecipient === ZERO_ADDR || offerRecipient === "") ? ZERO_ADDR : offerRecipient
+    //     }
 
-        const txHash = await writeContract(config, {
-            abi: pairContractAbi.abi,
-            address: createOfferParams.tokenPairAddress as `0x${string}`,
-            functionName: "createOffer",
-            args: [
-                createOfferParams.swapDirection,
-                createOfferParams.amountOffered,
-                createOfferParams.amountRequested,
-                createOfferParams.deadline,
-                createOfferParams.privateTaker],
-            value: tokenAInfo.tokenAddress === ZERO_ADDR ? parsedOfferAmount : 0n
-        })
+    //     const txHash = await writeContract(config, {
+    //         abi: pairContractAbi.abi,
+    //         address: createOfferParams.tokenPairAddress as `0x${string}`,
+    //         functionName: "createOffer",
+    //         args: [
+    //             createOfferParams.swapDirection,
+    //             createOfferParams.amountOffered,
+    //             createOfferParams.amountRequested,
+    //             createOfferParams.deadline,
+    //             createOfferParams.privateTaker],
+    //         value: tokenAInfo.tokenAddress === ZERO_ADDR ? parsedOfferAmount : 0n
+    //     })
 
-        const receipt = await waitForTransactionReceipt(config, { hash: txHash });
-        const events = parseEventLogs({
-            abi: pairContractAbi.abi,
-            logs: receipt.logs,
-            eventName: "OfferCreated" as const,
-        });
-        const offerEvent = events[0];
-        //@ts-ignore
-        const rawId = (offerEvent?.args as any)?.offerId ?? (offerEvent?.args as any)?.id;
-        if (rawId === undefined) {
-            console.error("Could not find offerId in logs. Check event name/args.");
-            return;
-        }
+    //     const receipt = await waitForTransactionReceipt(config, { hash: txHash });
+    //     const events = parseEventLogs({
+    //         abi: pairContractAbi.abi,
+    //         logs: receipt.logs,
+    //         eventName: "OfferCreated" as const,
+    //     });
+    //     const offerEvent = events[0];
+    //     //@ts-ignore
+    //     const rawId = (offerEvent?.args as any)?.offerId ?? (offerEvent?.args as any)?.id;
+    //     if (rawId === undefined) {
+    //         console.error("Could not find offerId in logs. Check event name/args.");
+    //         return;
+    //     }
 
-        const offerIdStr = (typeof rawId === "bigint" ? rawId.toString() : String(rawId));
-        const slug = `${createOfferParams.tokenPairAddress}-${offerIdStr}`;
+    //     const offerIdStr = (typeof rawId === "bigint" ? rawId.toString() : String(rawId));
+    //     const slug = `${createOfferParams.tokenPairAddress}-${offerIdStr}`;
 
-        // Update balances (your existing logic)
-        if (tokenAInfo.tokenAddress === ZERO_ADDR) {
-            await fetchEthBalance();
-        } else {
-            await fetchErc20Balance(tokenAInfo.tokenAddress as `0x${string}`);
-        }
+    //     // Update balances (your existing logic)
+    //     await fetchErc20Balance(originTokenPick?.tokenAddress as `0x${string}`);
 
-        // Show success UI with the proper slug
-        setCreatedSlug(slug);
-        setCreateOk(true);
-    }
+    //     // Show success UI with the proper slug
+    //     setCreatedSlug(slug);
+    //     setCreateOk(true);
+    // }
 
     const handleClick = async (tokenInfo: any) => {
         await handleSelectOfferToken(tokenInfo);
         setActiveToken(tokenInfo.tokenAddress);
     };
 
-    async function fetchAllTokens() {
-        try {
-            const res = await fetch(import.meta.env.VITE_API_URL + "/getAllTokens")
-            const data: tokenInfo[] = await res.json();
-            setAllTokens(data);
-
-        } catch (error) {
-            console.log(error);
-        }
-    }
 
     async function fetchConnectedTokens(address: string) {
         try {
@@ -276,56 +402,52 @@ function Home() {
         }
     }
 
-    useEffect(() => {
-        if (isConnected) {
-            fetchAllTokens()
-        }
-    }, [isConnected]);
-
     //@ts-ignore
     const { data: balance, isLoading, error } = useReadContract({
         abi: erc721Abi,
         address: testNFT.address,
         functionName: "balanceOf",
-        args: [userAddress!],
+        args: [userEVMAddress!],
         query: {
-            enabled: !!userAddress,
+            enabled: !!userEVMAddress,
         },
     });
+
+
+    async function skibidiy() {
+        console.log(getProofInputs.arguments);
+        console.log(await getContractAddressesAztec(SEPOLIA_CHAINID))
+    }
+
+    useEffect(() => {
+        skibidiy()
+    }, [])
 
     useEffect(() => {
         if (tokenAInput > 0) {
             checkAllowance()
         }
 
-    }, [tokenAInput, tokenAInfo])
+    }, [tokenAInput, originTokenPick])
 
 
     useEffect(() => {
-        if (!tokenAInfo) {
+        if (!originTokenPick) {
             return
         }
-        if (tokenAInfo.tokenAddress === ZERO_ADDR) {
-            fetchEthBalance();
-        } else {
-            fetchErc20Balance(tokenAInfo.tokenAddress as `0x${string}`);
-        }
-    }, [tokenAInfo])
+        fetchErc20Balance(originTokenPick?.tokenAddress as `0x${string}`);
+    }, [originTokenPick])
 
 
-    async function switchTokenDirection() {
-        if ((!tokenAInfo || !tokenBInfo)) {
+    async function switchChainPickDirection() {
+        if ((!originChainPick || !destinationChainPick)) {
             return
         }
 
-        setAllowanceSet(false)
-        const tempTokenInfo = tokenAInfo;
-        setTokenAInfo(tokenBInfo);
-        setActiveToken(tokenBInfo.tokenAddress);
-        handleSelectOfferToken(tokenBInfo);
-        setTokenBInfo(tempTokenInfo);
+        const tempChainPick = originChainPick;
+        setOriginChainPick(destinationChainPick);
+        setDestinationChainPick(tempChainPick);
         setIsSwapped(!isSwapped)
-        await checkAllowance()
     }
 
 
@@ -350,17 +472,6 @@ function Home() {
         return n.toFixed(2) + units[unitIndex];
     }
 
-    async function fetchEthBalance() {
-        if (!userAddress) {
-            return 0
-        }
-        const ethBalance = await getBalance(config, {
-            address: userAddress,
-        });
-
-        setTokenABalance(Number(formatEther(ethBalance.value)))
-    }
-
     function selectFullBalance() {
         setTokenAInput(tokenABalance);
         setTokenAInputRaw(tokenABalance.toString())
@@ -371,7 +482,7 @@ function Home() {
     }
 
     async function fetchErc20Balance(erc20Address: `0x${string}`) {
-        if (!userAddress) {
+        if (!userEVMAddress) {
             return 0;
         }
 
@@ -387,7 +498,7 @@ function Home() {
             abi: erc20Abi,
             address: erc20Address,
             functionName: "balanceOf",
-            args: [userAddress],
+            args: [userEVMAddress],
         }) as bigint;
 
         // 3. format with correct decimals
@@ -444,24 +555,8 @@ function Home() {
                                                 Origin
                                             </p>
                                             <button
-                                                onClick={() => {
-
-                                                }}
-                                                className="btn btn-secondary btn-outline btn-xs font-bold flex items-center px-2">
-                                                <p>address</p>
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    width="1rem"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    className="lucide lucide-chevron-down-icon lucide-chevron-down"
-                                                >
-                                                    <path d="m6 9 6 6 6-6" />
-                                                </svg>
+                                                className="btn btn-secondary btn-outline btn-xs font-bold flex items-center px-4">
+                                                <p>{displayAddressFromChainType(originChainPick)}</p>
                                             </button>
                                         </div>
                                         <div className="flex gap-2 items-center">
@@ -535,37 +630,17 @@ function Home() {
                                             </div>
                                         </div>
                                     </div>
-                                    <button onClick={switchTokenDirection} className="btn btn-secondary btn-circle absolute justify-self-center self-center hover:rotate-180 transition-transform duration-400">
+                                    <button onClick={switchChainPickDirection} className="btn btn-secondary btn-circle absolute justify-self-center self-center hover:rotate-180 transition-transform duration-400">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="1.5rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevrons-down-icon lucide-chevrons-down"><path d="m7 6 5 5 5-5" /><path d="m7 13 5 5 5-5" /></svg>
                                     </button>
                                     <div className="border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
                                         <div className="flex gap-2 items-center justify-between">
-                                            <p className="font-black">
+                                            <p className="font-black basis-1/2">
                                                 Destination
                                             </p>
-                                            <button
-                                                onClick={() => {
-
-                                                }}
-                                                className="btn btn-secondary btn-outline btn-xs font-bold flex items-center px-2">
-                                                <p>address</p>
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    width="1rem"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="2"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    className="lucide lucide-chevron-down-icon lucide-chevron-down"
-                                                >
-                                                    <path d="m6 9 6 6 6-6" />
-                                                </svg>
-                                            </button>
                                         </div>
                                         <div className="flex gap-2 items-center">
-                                            <input type="text" inputMode="decimal" placeholder="0" value={tokenBInputRaw} onChange={handleTokenBInputChange} className="font-bold input input-xl input-secondary bg-base-200 w-full border-0  focus:outline-0 focus-within:outline-0  focus-visible:outline-0  rounded text-4xl " />
+                                            <input type="text" disabled inputMode="decimal" placeholder="0" value={tokenAInputRaw} className="font-bold input input-xl input-secondary bg-base-200 w-full border-0  focus:outline-0 focus-within:outline-0  focus-visible:outline-0  rounded text-4xl " />
 
                                             {destinationChainPick ? (
                                                 <button
@@ -740,11 +815,13 @@ function Home() {
 
                                 <div className="w-full gap-2 flex">
                                     {allowanceSet ? (
-                                        <button onClick={handleCreateOffer} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0 || tokenBInput <= 0}>
+                                        <button onClick={async () => {
+                                            await handleBridgeOnL1();
+                                        }} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0 || !originChainPick || !destinationChainPick}>
                                             Create Offer
                                         </button>
                                     ) : (
-                                        <button onClick={setAllowance} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0 || tokenBInput <= 0}>
+                                        <button onClick={setAllowance} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0}>
                                             Approve First
                                         </button>
                                     )}

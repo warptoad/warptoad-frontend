@@ -7,25 +7,33 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pull": "cp ./node_modules/warp-toad-old-backend/dist/ignition/deployments/* ./src/components/artifacts/",
+    "norm": "find . -depth -name '*#*' -exec bash -c 'f=\"$1\"; nf=\"${f//\\#/}\"; [ \"$f\" != \"$nf\" ] && mv -n \"$f\" \"$nf\"' _ {} \\;"
   },
   "dependencies": {
     "@azguardwallet/client": "^0.4.2",
+    "@aztec/aztec.js": "^1.2.1",
+    "@aztec/bb.js": "0.72.1",
     "@tailwindcss/vite": "^4.1.12",
     "@tanstack/react-query": "^5.85.3",
     "@wagmi/core": "^2.20.3",
     "connectkit": "^1.9.1",
     "daisyui": "^5.0.50",
+    "ethers": "^6.15.0",
     "flatpickr": "^4.6.13",
+    "poseidon-lite": "^0.3.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.8.0",
     "tailwindcss": "^4.1.12",
     "theme-change": "^2.5.0",
     "viem": "^2.36.0",
-    "wagmi": "^2.16.3"
+    "wagmi": "^2.16.3",
+    "warp-toad-old-backend": "^1.0.22"
   },
   "devDependencies": {
+    "@azguardwallet/types": "^0.4.1",
     "@eslint/js": "^9.33.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
@@ -36,6 +44,7 @@
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "vite-plugin-node-polyfills": "^0.24.0"
   }
 }
