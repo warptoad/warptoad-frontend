@@ -13,6 +13,9 @@ import l1Addresses from "../components/artifacts/chain-11155111/deployed_address
 import l2Addresses from "../components/artifacts/chain-534351/deployed_addresses.json"
 import { abi as warptoadAbi } from "../components/artifacts/chain-11155111/artifacts/L1WarpToadModuleL1WarpToad.json";
 
+import { WarpToadCoreContractArtifact, WarpToadCoreContract } from "@warp-toad/backend/aztec/WarpToadCore";
+import { GigaBridge__factory } from "@warp-toad/backend/ethers/typechain-types";
+
 
 import { getContractAddressesAztec, getContractAddressesEvm, evmDeployments } from "warp-toad-old-backend/deployment";
 import { SEPOLIA_CHAINID, SCROLL_CHAINID_SEPOLIA } from "warp-toad-old-backend/constants";
@@ -229,37 +232,36 @@ function Home() {
                 console.log(txHashWrap);
         */
 
-                
-        console.log(await getContractAddressesAztec(SEPOLIA_CHAINID))
+
+
 
         if (!azguardClient) return;
 
+        const chainsen = (await getContractAddressesAztec(11155111n)).AztecWarpToad
+        console.log(chainsen)
+
         const account = azguardClient.accounts[0];
         const address = account.split(":").at(-1);
+        console.log("waa")
 
-        const [result] = await azguardClient.execute([
+        const contractInstance = await WarpToadCoreContract.at(chainsen, azguardClient);
+
+        const [
+            registerContractResult,
+        ] = await azguardClient.execute([
             {
-                kind: "simulate_views",
-                account: account,
-                calls: [
-                    {
-                        kind: "call",
-                        contract: "0x06216f30183f2ab424eb87b296588e0404ce13b837c09d7e5db94d7a846a260f",
-                        method: "balance_of_public",
-                        args: [address],
-                    }
-                ],
-            },
-        ])
+                kind: "register_contract",
+                chain: "aztec:11155111",
+                address: chainsen,
+                instance: WarpToadCoreContract.at(),
+                artifact: WarpToadCoreContractArtifact,
+            }
+        ]);
+        console.log("watero")
         console.log(account)
-        if (result.status !== "ok") {
-            console.log("errrooooor")
-            return
-        }
+        const wat = (registerContractResult.status)
+        console.log(wat)
 
-        const publicBalance = (result.result as SimulateViewsResult).decoded[0];
-
-        console.log(publicBalance)
 
         //await getChainIdAztecFromContract()
 
