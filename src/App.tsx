@@ -3,12 +3,12 @@ import './App.css'
 import Navbar from './components/Navbar'
 import Home from './pages/Home'
 import Account from './pages/Account'
-import { AzguardProvider } from './Context/AzguardContext'
+import { AztecWalletProvider } from './Context/AztecWalletContext'
 
 function App() {
 
   return (
-    <AzguardProvider>
+    <AztecWalletProvider>
       <div className='h-full flex flex-col bg-base-200'>
         <Navbar />
         <Routes>
@@ -16,7 +16,7 @@ function App() {
           <Route path="/account" element={<Account />} />
         </Routes>
       </div>
-    </AzguardProvider >
+    </AztecWalletProvider >
   )
 }
 

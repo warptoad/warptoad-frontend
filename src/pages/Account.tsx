@@ -1,8 +1,7 @@
 
 import { useAccount } from "wagmi";
 import { CustomConnectKitButton } from "../components/CustomConnectKitButton";
-import AzguardWallet from "../components/Aztec/AzguardWallet";
-import { useAzguard } from "../Context/AzguardContext";
+import AztecCustomWallet from "../components/Aztec/AztecCustomWallet";
 import { waitForTransactionReceipt, writeContract } from "@wagmi/core";
 import { config } from "../config/wagmiConfig";
 import { abi as testTokenAbi } from "../components/artifacts/chain-11155111/artifacts/TestTokenUSDcoin.json";
@@ -37,10 +36,7 @@ function Account() {
                     <div className="flex gap-2 items-center">
                         <div aria-label="status" className={`status status-xl ${isConnected ? "status-success" : "status-error"}`}></div>
                         <p className="btn btn-secondary">Aztec wallet</p>
-                        <AzguardWallet />
-                        <button
-                            className="btn btn-secondary btn-outline">check balance
-                        </button>
+                        <AztecCustomWallet/>
                     </div>
                 </div>
             </div>

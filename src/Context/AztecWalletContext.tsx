@@ -2,17 +2,26 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPXEClient, waitForPXE, type PXE, type Wallet, GrumpkinScalar, SponsoredFeePaymentMethod, Fr, type ContractInstanceWithAddress, createAztecNodeClient, AztecAddress } from '@aztec/aztec.js';
 import { WarpToadCoreContractArtifact, WarpToadCoreContract } from "@warp-toad/backend/aztec/WarpToadCore";
-import { L2AztecBridgeAdapterContract, L2AztecBridgeAdapterContractArtifact} from "@warp-toad/backend/aztec/L2AztecBridgeAdapter";
-import { getContractAddressesAztec } from "warp-toad-old-backend/deployment";
+import { L2AztecBridgeAdapterContract, L2AztecBridgeAdapterContractArtifact } from "@warp-toad/backend/aztec/L2AztecBridgeAdapter";
+import { getContractAddressesAztec } from "@warp-toad/backend/deployment";
+import { SPONSORED_FPC_SALT } from '@aztec/constants';
+import { getSchnorrAccount } from "@aztec/accounts/schnorr";
+import { ethers } from "ethers";
+import { deriveSigningKey } from "@aztec/stdlib/keys";
+import { getContractInstanceFromDeployParams } from '@aztec/aztec.js/contracts';
+import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
 
 
 type AzguardContextValue = {
   isConnected: boolean;
+  isLoading: boolean;
   address: string | null;
-  wallet: Wallet | null;
-  pxe: PXE | null;
-  connect: () => Promise<void>;
+  wallet: Wallet | null | undefined;
+  pxe: PXE | null | undefined;
+  connect: (secretKey: `0x${string}`) => Promise<void>;
   disconnect: () => Promise<void>;
+  restore: () => Promise<void>;
+  createRandomPrivKey: () => `0x${string}`
 };
 
 const AztecWalletContext = createContext<AzguardContextValue | null>(null);
@@ -21,10 +30,18 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
   const clientRef = useRef<Wallet | null>(null);
   const initOnceRef = useRef(false);
 
+  const [isLoading, setIsLoading] = useState(false);
+
   const [pxeStore, setPxeStore] = useState<PXE | null>();
+  const [walletStore, setWalletStore] = useState<Wallet | null>();
 
   const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!walletStore) return
+    setAddress(walletStore.getAddress().toString())
+  }, [walletStore])
 
   async function instantiatePXE() {
 
@@ -38,116 +55,164 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
     const AztecWarpToadAddress = addresses.AztecWarpToad
     const L2AztecAdapterAddress = addresses.L2AztecBridgeAdapter
 
-    console.log("assuming ur not on sand box so registering the contracts with aztec testnet node")
+    const alreadyRegistered = localStorage.getItem('aztecContractsRegistered');
 
-    const node = createAztecNodeClient("https://aztec-alpha-testnet-fullnode.zkv.xyz")
-    const AztecWarpToadContract = await node.getContract(AztecAddress.fromString(AztecWarpToadAddress))
-    console.log("2")
-    if (AztecWarpToadContract) {
+    if (!alreadyRegistered) {
 
-      await PXE.registerContract({
-        instance: AztecWarpToadContract,
-        //@ts-ignore
-        artifact: WarpToadCoreContractArtifact,
-      })
-      console.log("3")
-      await delay(10000)
-      const L2AztecAdapterContract = await node.getContract(AztecAddress.fromString(L2AztecAdapterAddress))
+      console.log("assuming u r not on sand box so registering the contracts with aztec testnet node")
 
-      if (L2AztecAdapterContract) {
+      const node = createAztecNodeClient("https://aztec-alpha-testnet-fullnode.zkv.xyz")
+      const AztecWarpToadContract = await node.getContract(AztecAddress.fromString(AztecWarpToadAddress))
+      if (AztecWarpToadContract) {
+
         await PXE.registerContract({
-          instance: L2AztecAdapterContract,
-        //@ts-ignore
-          artifact: L2AztecBridgeAdapterContractArtifact,
+          instance: AztecWarpToadContract,
+          //@ts-ignore
+          artifact: WarpToadCoreContractArtifact,
         })
         await delay(10000)
+        const L2AztecAdapterContract = await node.getContract(AztecAddress.fromString(L2AztecAdapterAddress))
+
+        if (L2AztecAdapterContract) {
+          await PXE.registerContract({
+            instance: L2AztecAdapterContract,
+            //@ts-ignore
+            artifact: L2AztecBridgeAdapterContractArtifact,
+          })
+          await delay(10000)
+        }
+
+        localStorage.setItem('aztecContractsRegistered', "1");
       }
+      console.log("DONE")
+
     }
 
   }
 
+  function createRandomAztecPrivateKey(): `0x${string}` {
+    const privKey = GrumpkinScalar.random();
+    const scalar = privKey.toBigInt(); // bigint
+    const hex = '0x' + scalar.toString(16).padStart(64, '0');
+    return hex as `0x${string}`
+  }
+
+  async function fetchSchnorrAccount(secretKey: `0x${string}`, salt: string) {
+    if (!pxeStore) {
+      return
+    }
+
+    let currentSecretKey = Fr.fromHexString(secretKey);
+    let currentSalt = Fr.fromHexString(salt);
+
+    let schnorrAccount = await getSchnorrAccount(pxeStore, currentSecretKey, deriveSigningKey(currentSecretKey), currentSalt.toBigInt());
+    let wallet = await schnorrAccount.getWallet();
+    setWalletStore(wallet);
+  }
+
+  async function getSponsoredFPCInstance(): Promise<ContractInstanceWithAddress> {
+    //@ts-ignore
+    return await getContractInstanceFromDeployParams(SponsoredFPCContract.artifact, {
+      salt: new Fr(SPONSORED_FPC_SALT),
+    });
+  }
+
+  async function deploySchnorrAccount(secretKey: `0x${string}`, salt: string) {
+    if (!pxeStore) {
+      console.log("error no PXE");
+      return;
+    }
+    const sponsoredFPC = await getSponsoredFPCInstance();
+    //@ts-ignore
+    await pxeStore.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+    const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+
+    let currentSecretKey = Fr.fromHexString(secretKey);
+    let currentSalt = Fr.fromHexString(salt);
+
+    let schnorrAccount = await getSchnorrAccount(pxeStore, currentSecretKey, deriveSigningKey(currentSecretKey), currentSalt.toBigInt());
+
+    try {
+      //TODO: find out deploy wallet not funded?
+      await schnorrAccount.deploy({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: 60 * 60 * 12 });
+    } catch (error) {
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const chainId = (await provider.getNetwork()).chainId
+      if (chainId != 11155111n) {
+        console.log(error)
+      }
+    }
+    let wallet = await schnorrAccount.getWallet();
+
+    setWalletStore(wallet);
+  }
+
+  async function connectAztecWallet(secretKey: `0x${string}`): Promise<void> {
+    setIsLoading(true)
+    if (!pxeStore) {
+      console.log("error no PXE");
+      setIsLoading(false)
+      return;
+    }
+
+    const privateKey = secretKey;
+    const salt = createRandomAztecPrivateKey(); // can also randomize per user if needed
+
+    await deploySchnorrAccount(privateKey, salt);
+    //TODO: MAKE IT MORE SECURE WHEN RELEASED LOOOOL
+    // Persist keys
+    localStorage.setItem('aztecPrivateKey', privateKey);
+    localStorage.setItem('aztecSalt', salt);
+    setIsLoading(false)
+    setIsConnected(true)
+  }
+
+  async function restoreAztecWalletIfPossible(): Promise<void> {
+    setIsLoading(true)
+    const privKey = localStorage.getItem('aztecPrivateKey');
+    const salt = localStorage.getItem('aztecSalt');
+    if (!privKey || !salt) {
+      setIsLoading(false)
+      return;
+    }
+    if (!pxeStore) {
+      setIsLoading(false)
+      return;
+    }
+
+    await fetchSchnorrAccount(privKey as `0x${string}`, salt);
+    setIsLoading(false)
+    setIsConnected(true)
+  }
+
+  async function disconnectAztecWallet(): Promise<void> {
+    setWalletStore(undefined);
+    localStorage.removeItem('aztecPrivateKey');
+    localStorage.removeItem('aztecSalt');
+    setIsConnected(false)
+  }
+
+  async function initInstance() {
+    setIsLoading(true)
+    await instantiatePXE();
+    setIsLoading(false)
+  }
+
   useEffect(() => {
-    if (initOnceRef.current) return;
-    initOnceRef.current = true;
-
-    let removeHandlers: Array<() => void> = [];
-
-    (async () => {
-
-      const client = await AzguardClient.create();
-      clientRef.current = client;
-
-      // initial snapshot
-      setIsConnected(client.connected);
-      setAddress(client.accounts?.[0] ?? null);
-
-      // disconnected
-      const onDisconnected = () => {
-        setIsConnected(false);
-        setAddress(null);
-      };
-      client.onDisconnected.addHandler(onDisconnected);
-      removeHandlers.push(() => client.onDisconnected.removeHandler(onDisconnected));
-
-      // optional: if SDK exposes account/connected events, wire them similarly
-      if (client.onAccountsChanged?.addHandler) {
-        const onAccountsChanged = (accounts: string[]) => setAddress(accounts?.[0] ?? null);
-        client.onAccountsChanged.addHandler(onAccountsChanged);
-        removeHandlers.push(() => client.onAccountsChanged.removeHandler(onAccountsChanged));
-      }
-
-
-      if (client.onConnected?.addHandler) {
-        const onConnected = () => setIsConnected(true);
-        client.onConnected.addHandler(onConnected);
-        removeHandlers.push(() => client.onConnected.removeHandler(onConnected));
-      }
-    })();
-
-    return () => {
-      for (const rm of removeHandlers) {
-        try { rm(); } catch { }
-      }
-    };
-  }, []);
-
-  const connect = useCallback(async () => {
-
-    const client = clientRef.current ?? (await AzguardClient.create());
-    clientRef.current = client;
-
-    if (!client.connected) {
-      await client.connect(
-        { name: "Warptoad" },
-        [
-          {
-            chains: ["aztec:11155111"],
-            methods: ["send_transaction", "add_private_authwit", "call"],
-          },
-        ],
-      );
-    }
-    setIsConnected(client.connected);
-    setAddress(client.accounts?.[0] ?? null);
-  }, []);
-
-  const disconnect = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client) return;
-    if (typeof (client as any).disconnect === "function") {
-      await (client as any).disconnect(); // will trigger onDisconnected
-    } else {
-      setIsConnected(false);
-      setAddress(null);
-    }
+    initInstance()
+    restoreAztecWalletIfPossible();
   }, []);
 
   const value: AzguardContextValue = {
     isConnected,
+    isLoading,
     address,
-    client: clientRef.current,
-    connect,
-    disconnect,
+    wallet: walletStore,
+    pxe: pxeStore,
+    connect: connectAztecWallet,
+    disconnect: disconnectAztecWallet,
+    restore: restoreAztecWalletIfPossible,
+    createRandomPrivKey: createRandomAztecPrivateKey
   };
 
   return <AztecWalletContext.Provider value={value}>{children}</AztecWalletContext.Provider>;

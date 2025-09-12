@@ -1,7 +1,7 @@
 import { poseidon2, poseidon3 } from 'poseidon-lite';
-import {Fr, Contract, AztecAddress} from '@aztec/aztec.js';
-import { getContractAddressesAztec, getL2AZTECContracts } from 'warp-toad-old-backend/deployment';
-import { SEPOLIA_CHAINID } from 'warp-toad-old-backend/constants';
+import { Fr, Contract, AztecAddress } from '@aztec/aztec.js';
+import { getContractAddressesAztec, getL2AZTECContracts } from '@warp-toad/backend/deployment';
+import { SEPOLIA_CHAINID } from '@warp-toad/backend/constants';
 
 type ChainType = {
     type: "AZTEC" | "EVM";
@@ -31,6 +31,27 @@ export type WarptoadNote = {
     preCommitment: bigint;
 }
 
+export function saveNotes(notes: WarptoadNote[]) {
+    const serialized = JSON.stringify(notes, (_, value) =>
+        typeof value === "bigint" ? value.toString() : value
+    );
+    localStorage.setItem("warptoadNotes", serialized);
+}
+
+// Load notes array
+export function loadNotes(): WarptoadNote[] {
+    const stored = localStorage.getItem("warptoadNotes");
+    if (!stored) return [];
+
+    return JSON.parse(stored, (_, value) => {
+        // Convert back strings that look like bigints
+        if (typeof value === "string" && /^\d+$/.test(value)) {
+            return BigInt(value);
+        }
+        return value;
+    });
+}
+
 export function createRandomPreImg(amount: bigint, chainIdAztecFromContract: bigint) {
     const preImg: CommitmentPreImg = {
         amount,
@@ -49,52 +70,12 @@ export function hashCommitment(preCommitment: bigint, amount: bigint): bigint {
     return poseidon2([preCommitment, amount])
 }
 
-export async function getChainIdAztecFromContract() {
-
-    const aztecAddressDeployment = await getContractAddressesAztec(SEPOLIA_CHAINID)
-
-    if (!window.azguard) {
-        throw "Azguard Wallet is not installed";
-    }
-    const wallet = window.azguard.createClient()
-
-    const lol = await wallet.request('execute').
-
-    console.log(lol)
-
-
-/*
-    const deployments = getL2AZTECContracts()
-
-
-    const aztecWallet = get(aztecWalletStore);
-    if (!aztecWallet) {
-        console.warn('EVM wallet not connected');
-        return;
-    }
-
-    const AztecWarpToad = await Contract.at(
-        AztecAddress.fromString(aztecAddressDeployment),
-        WarpToadCoreContractArtifact,
-        aztecWallet,
-    );
-
-
-
-    const aztecVersion = (await aztecWallet.getNodeInfo()).rollupVersion;
-    const chainIdAztecFromContract = await AztecWarpToad.methods.get_chain_id_unconstrained(aztecVersion).simulate() as bigint
-    return chainIdAztecFromContract
-    */
-}
-
 export async function createPreCommitment(amount: bigint, chainIdAztecFromContract: bigint) {
 
     const commitmentPreImg = createRandomPreImg(amount, chainIdAztecFromContract);
     if (!commitmentPreImg) {
         return;
     }
-
-    console.log(commitmentPreImg)
     const preCommitment = hashPreCommitment(commitmentPreImg)
 
     const note: WarptoadNote = {
