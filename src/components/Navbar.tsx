@@ -4,6 +4,7 @@ import logo from "../assets/WarptoadLogo.svg";
 import { useEffect, useState } from "react";
 
 function Navbar() {
+
     const closeDrawer = () => {
         const el = document.getElementById("navbarDrawer") as HTMLInputElement | null;
         if (el) el.checked = false;

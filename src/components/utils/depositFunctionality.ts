@@ -31,25 +31,82 @@ export type WarptoadNote = {
     preCommitment: bigint;
 }
 
-export function saveNotes(notes: WarptoadNote[]) {
-    const serialized = JSON.stringify(notes, (_, value) =>
+export type WarptoadNoteStorageEntry = {
+    note: WarptoadNote;
+    isAvailable: boolean;
+}
+
+export function saveNotes(newNotes: WarptoadNoteStorageEntry[]) {
+    const stored = localStorage.getItem("warptoadNotes");
+    let existing: WarptoadNoteStorageEntry[] = [];
+
+    if (stored) {
+        try {
+            existing = JSON.parse(stored, (_, v) =>
+                typeof v === "string" && /^\d+$/.test(v) ? BigInt(v) : v
+            );
+        } catch {
+            existing = [];
+        }
+    }
+
+    // Build a set of existing preCommitments (as string for easy comparison)
+    const existingKeys = new Set(
+        existing.map(n => n.note.preCommitment.toString())
+    );
+
+    // Only keep notes not already present
+    const uniques = newNotes.filter(
+        n => !existingKeys.has(n.note.preCommitment.toString())
+    );
+
+    // Append uniques
+    const merged = [...existing, ...uniques];
+
+    // Save back
+    const serialized = JSON.stringify(merged, (_, value) =>
         typeof value === "bigint" ? value.toString() : value
     );
     localStorage.setItem("warptoadNotes", serialized);
 }
 
+export function updateNoteByIndex(index: number) {
+    const stored = localStorage.getItem("warptoadNotes");
+    let existing: WarptoadNoteStorageEntry[] = [];
+
+    if (stored) {
+        try {
+            existing = JSON.parse(stored, (_, v) =>
+                typeof v === "string" && /^\d+$/.test(v) ? BigInt(v) : v
+            );
+        } catch {
+            existing = [];
+        }
+    }
+
+    if (index < 0 || index >= existing.length) {
+        console.warn(`updateNoteByIndex: index ${index} out of bounds`);
+        return;
+    }
+
+    // Replace the entry with isAvailable = false
+    existing[index] = { ...existing[index], isAvailable: false };
+
+    const serialized = JSON.stringify(existing, (_, value) =>
+        typeof value === "bigint" ? value.toString() : value
+    );
+    localStorage.setItem("warptoadNotes", serialized);
+}
+
+
+
 // Load notes array
-export function loadNotes(): WarptoadNote[] {
+export function loadNotes(): WarptoadNoteStorageEntry[] {
     const stored = localStorage.getItem("warptoadNotes");
     if (!stored) return [];
-
-    return JSON.parse(stored, (_, value) => {
-        // Convert back strings that look like bigints
-        if (typeof value === "string" && /^\d+$/.test(value)) {
-            return BigInt(value);
-        }
-        return value;
-    });
+    return JSON.parse(stored, (_, value) =>
+        typeof value === "string" && /^\d+$/.test(value) ? BigInt(value) : value
+    );
 }
 
 export function createRandomPreImg(amount: bigint, chainIdAztecFromContract: bigint) {

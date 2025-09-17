@@ -8,7 +8,7 @@ import { SPONSORED_FPC_SALT } from '@aztec/constants';
 import { getSchnorrAccount } from "@aztec/accounts/schnorr";
 import { ethers } from "ethers";
 import { deriveSigningKey } from "@aztec/stdlib/keys";
-import { getContractInstanceFromDeployParams } from '@aztec/aztec.js/contracts';
+import { Contract, getContractInstanceFromDeployParams } from '@aztec/aztec.js/contracts';
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
 
 
@@ -21,6 +21,7 @@ type AzguardContextValue = {
   connect: (secretKey: `0x${string}`) => Promise<void>;
   disconnect: () => Promise<void>;
   restore: () => Promise<void>;
+  testMint: () => Promise<void>;
   createRandomPrivKey: () => `0x${string}`
 };
 
@@ -46,7 +47,7 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
   async function instantiatePXE() {
 
     const delay = async (timeInMs: number) => await new Promise((resolve) => setTimeout(resolve, timeInMs))
-    const { PXE_URL = 'http://localhost:8080' } = process.env;
+    const { PXE_URL = 'https://pxe.warptoad.xyz' } = process.env;
     const PXE = createPXEClient(PXE_URL);
     await waitForPXE(PXE);
     setPxeStore(PXE);
@@ -57,8 +58,9 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
 
     const alreadyRegistered = localStorage.getItem('aztecContractsRegistered');
 
-    if (!alreadyRegistered) {
 
+    if (!alreadyRegistered) {
+      //TODO NEEDED IF PXE RESETS
       console.log("assuming u r not on sand box so registering the contracts with aztec testnet node")
 
       const node = createAztecNodeClient("https://aztec-alpha-testnet-fullnode.zkv.xyz")
@@ -85,7 +87,7 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
         localStorage.setItem('aztecContractsRegistered', "1");
       }
       console.log("DONE")
-
+    
     }
 
   }
@@ -147,6 +149,42 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
     setWalletStore(wallet);
   }
 
+  async function mintTestTokens() {
+    if (!walletStore) {
+      console.warn('AZTEC wallet not connected');
+      return;
+    }
+
+    const addresses = await getContractAddressesAztec(11155111n)
+    const AztecWarpToadAddress = addresses.AztecWarpToad
+
+    const AztecWarpToad = await Contract.at(
+      AztecAddress.fromString(AztecWarpToadAddress),
+      WarpToadCoreContractArtifact,
+      walletStore,
+    );
+
+    const initialBalanceSender = 10n * 10n ** 18n
+    const sponsoredFPC = await getSponsoredFPCInstance();
+    console.log("fpc shenanigans:)")
+    //@ts-ignore
+    await pxeStore.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+    const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+    //@ts-ignore
+    console.log("now comes the big moment!")
+    try {
+    await AztecWarpToad.methods.mint_for_testing(initialBalanceSender, walletStore.getAddress()).send({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: 60 * 10 })
+    console.log("it worked, yay!! :D")
+      
+    } catch (error) {
+      console.log(error)
+      console.log("do you have enough feejuice?")
+    }
+    const usdcBalance = await AztecWarpToad.methods.balance_of(walletStore.getAddress()).simulate();
+    console.log(usdcBalance)
+
+  }
+
   async function connectAztecWallet(secretKey: `0x${string}`): Promise<void> {
     setIsLoading(true)
     if (!pxeStore) {
@@ -175,6 +213,7 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
       setIsLoading(false)
       return;
     }
+
     if (!pxeStore) {
       setIsLoading(false)
       return;
@@ -198,10 +237,16 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
     setIsLoading(false)
   }
 
+
   useEffect(() => {
-    initInstance()
-    restoreAztecWalletIfPossible();
+    initInstance();
   }, []);
+  useEffect(() => {
+    if (pxeStore) {
+      restoreAztecWalletIfPossible();
+    }
+
+  }, [pxeStore]);
 
   const value: AzguardContextValue = {
     isConnected,
@@ -212,6 +257,7 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
     connect: connectAztecWallet,
     disconnect: disconnectAztecWallet,
     restore: restoreAztecWalletIfPossible,
+    testMint: mintTestTokens,
     createRandomPrivKey: createRandomAztecPrivateKey
   };
 

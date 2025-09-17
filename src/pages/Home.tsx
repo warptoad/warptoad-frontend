@@ -4,28 +4,30 @@ import { isAddress, getAddress, erc20Abi, erc721Abi, formatEther, formatUnits, p
 //@ts-ignore
 import { getBalance, readContract, waitForTransactionReceipt, writeContract } from "@wagmi/core";
 import { useWalletClient } from 'wagmi'
-import { BrowserProvider } from 'ethers'
+import { BrowserProvider, JsonRpcProvider, toBeHex, toBigInt } from 'ethers'
 import logo from "../assets/WarptoadLogo.svg";
 import { testNFT } from "../components/Admin/Test/TestOCBMockConfig";
 import { config } from "../config/wagmiConfig";
 import { CustomConnectKitButton } from "../components/CustomConnectKitButton";
 import { useAztecWallet } from "../Context/AztecWalletContext";
-import l1Addresses from "../components/artifacts/chain-11155111/deployed_addresses.json";
-import l2Addresses from "../components/artifacts/chain-534351/deployed_addresses.json"
 import { abi as warptoadAbi } from "../components/artifacts/chain-11155111/artifacts/L1WarpToadModuleL1WarpToad.json";
 
 import { WarpToadCoreContractArtifact, WarpToadCoreContract } from "@warp-toad/backend/aztec/WarpToadCore";
-import { L1WarpToad__factory, GigaBridge__factory } from "@warp-toad/backend/ethers/typechain-types";
+import { L1WarpToad__factory, GigaBridge__factory, WarpToadCore__factory, type GigaBridge, type WarpToadCore, L2WarpToad__factory } from "@warp-toad/backend/ethers/typechain-types";
+import { aztecDeployments } from "@warp-toad/backend/deployment"
 
 
-import { getContractAddressesAztec, getContractAddressesEvm, evmDeployments, getSponsoredFPCInstance } from "@warp-toad/backend/deployment";
-import { getMerkleData } from "@warp-toad/backend/proving";
-import { createPreCommitment, hashCommitment, loadNotes, saveNotes, type WarptoadNote } from "../components/utils/depositFunctionality";
+import { getContractAddressesAztec, getContractAddressesEvm, evmDeployments, getSponsoredFPCInstance, getL2EvmContracts } from "@warp-toad/backend/deployment";
+import { calculateFeeFactor, getMerkleData, getProofInputs } from "@warp-toad/backend/proving";
+import { createPreCommitment, hashCommitment, loadNotes, saveNotes, updateNoteByIndex, type WarptoadNote, type WarptoadNoteStorageEntry } from "../components/utils/depositFunctionality";
 import { AzguardClient } from "@azguardwallet/client";
 import type { SimulateViewsResult } from "@azguardwallet/types";
 import { AztecAddress, Contract, Fr, SponsoredFeePaymentMethod } from "@aztec/aztec.js";
 import { useEthersSigner } from "../hooks/useEthersSigner";
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
+import NoteInput from "../components/Input/NoteInput";
+import { gasCostPerChain } from "@warp-toad/backend/constants";
+import { poseidon1, poseidon3 } from "poseidon-lite";
 
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
@@ -100,7 +102,7 @@ const mockFetchData: TokenSelection[] = [
         },
         chainTokens: [
             {
-                tokenAddress: l1Addresses["TestToken#USDcoin"],
+                tokenAddress: evmDeployments[11155111]["TestToken#USDcoin"],
                 tokenName: "USD Coin",
                 tokenSymbol: "USDC",
             }
@@ -113,7 +115,7 @@ const mockFetchData: TokenSelection[] = [
         },
         chainTokens: [
             {
-                tokenAddress: l2Addresses["L2ScrollModule#L2WarpToad"],
+                tokenAddress: evmDeployments[534351]["L2ScrollModule#L2WarpToad"],
                 tokenName: "USD Coin",
                 tokenSymbol: "USDC",
             }
@@ -142,12 +144,27 @@ const shorten = (input?: string | null) => {
     return addr.length <= 10 ? addr : `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 };
 
+const chainNames: Record<number, string> = {
+    1: "Ethereum Mainnet",
+    11155111: "Sepolia",
+    534351: "Scroll",
+};
+
+function chainIdToString(chainId: bigint) {
+    return chainNames[Number(chainId)] ?? `Aztec`;
+}
+
+function parseTokenWithdrawAmount(amount: bigint, chainId: bigint) {
+    return chainIdToString(chainId) === "Aztec" ? Number(amount) / 10 ** 6 : Number(amount) / 10 ** 18
+}
+
+
 const bridgeStates = ["wrapping", "bridging", "bridging successful!"]
 
 function Home() {
     const signer = useEthersSigner();
-    const { address: userEVMAddress, isConnected, connector } = useAccount();
-    const { address: userAztecAddress, wallet: userAztecWallet, isConnected: aztecConnected, pxe } = useAztecWallet();
+    const { address: userEVMAddress, isConnected, connector, chainId: chainIdEvm } = useAccount();
+    const { address: userAztecAddress, wallet: userAztecWallet, isConnected: aztecConnected, pxe, testMint } = useAztecWallet();
 
     const originSelectionModal = useRef<HTMLDialogElement>(null);
     const destinationSelectionModal = useRef<HTMLDialogElement>(null);
@@ -181,12 +198,9 @@ function Home() {
     const [tokenBInfo, setTokenBInfo] = useState<tokenInfo | null>();
 
     const [tokenPairAddress, setTokenPairAddress] = useState("");
-
-    const [isPrivateOffer, setIsPrivateOffer] = useState(false);
-    const [offerRecipient, setOfferRecipient] = useState("");
     const [activeToken, setActiveToken] = useState<string | null>(null);
     const [allowanceSet, setAllowanceSet] = useState(false);
-    const [notes, setNotes] = useState<WarptoadNote[]>([]);
+    const [notes, setNotes] = useState<WarptoadNoteStorageEntry[]>([]);
 
     const [isSwapped, setIsSwapped] = useState(false);
 
@@ -207,15 +221,9 @@ function Home() {
 
     }
 
-    // Load once
     useEffect(() => {
-        setNotes(loadNotes());
+        setNotes(loadNotes())
     }, []);
-
-    // Save whenever notes changes
-    useEffect(() => {
-        saveNotes(notes);
-    }, [notes]);
 
     function downloadFile(data: WarptoadNote) {
         const timestamp = Date.now();
@@ -265,78 +273,220 @@ function Home() {
         return chainIdAztecFromContract
     }
 
-    async function handleBridgeOnL1() {
+    async function handleDeposit() {
         if (!originTokenPick) return
-        const aztecChainID = await getChainIdAztecFromContract();
 
-        if (!aztecChainID) {
-            console.log("ERROR GETTING AZTEC CHAIN ID");
-            return;
+        if (originChainPick?.chainType === "EVM") {
+            const aztecChainID = await getChainIdAztecFromContract();
+
+            if (!aztecChainID) {
+                console.log("ERROR GETTING AZTEC CHAIN ID");
+                return;
+            }
+
+            setIsBridging(0);
+
+            const decimals = await readContract(config, {
+                abi: erc20Abi,
+                address: originTokenPick.tokenAddress as `0x${string}`,
+                functionName: "decimals",
+            }) as number;
+
+            const amount = BigInt(tokenAInput * 10 ** decimals)
+
+            const noteData = await createPreCommitment(amount, aztecChainID)
+
+            console.log(noteData)
+
+            if (!noteData) return
+
+            if (chainIdEvm === 11155111) {
+                const txHashWrap = await writeContract(config, {
+                    abi: warptoadAbi,
+                    address: evmDeployments[chainIdEvm as number]["L1WarpToadModule#L1WarpToad"] as `0x${string}`,
+                    functionName: "wrap",
+                    args: [amount],
+                    chainId: chainIdEvm as 11155111 | 534351 | undefined
+                })
+
+                console.log("submitted:", txHashWrap)
+
+                // Wait until mined
+                const receipt = await waitForTransactionReceipt(config, {
+                    hash: txHashWrap,
+                })
+
+                console.log("confirmed:", receipt)
+            }
+            setIsBridging(1);
+
+            //evmDeployments[chainIdEvm as number][chainIdEvm === 11155111 ? "L1InfraModule#L1WarpToad" : "L2ScrollModule#L2WarpToad"]
+            const txHashBurn = await writeContract(config, {
+                abi: L1WarpToad__factory.abi,
+                address: evmDeployments[chainIdEvm as number][chainIdEvm === 11155111 ? "L1InfraModule#L1WarpToad" : "L2ScrollModule#L2WarpToad"] as `0x${string}`,
+                functionName: "burn",
+                args: [noteData?.preCommitment!, amount],
+                chainId: chainIdEvm as 11155111 | 534351 | undefined
+            })
+
+            console.log("submitted:", txHashBurn)
+
+            // Wait until mined
+            const receiptBurn = await waitForTransactionReceipt(config, {
+                hash: txHashBurn,
+            })
+
+            console.log("confirmed:", receiptBurn)
+
+            setIsBridging(2);
+            downloadFile(noteData);
+            saveNotes([{
+                isAvailable: true,
+                note: noteData
+            }])
+            //update balance
+            await fetchInputBalance(originTokenPick?.tokenAddress as `0x${string}`);
+
+            setNotes(loadNotes())
+        }
+        if (originChainPick?.chainType === "AZTEC") {
+            if (!destinationChainPick) return
+
+            console.log("starting aztec stuff");
+            setIsBridging(0);
+            const bridgeAmount = BigInt(tokenAInput * 10 ** 18)
+
+            const chainIdUsed = BigInt(Number(destinationChainPick.chainId))
+
+            const noteData = await createPreCommitment(bridgeAmount, chainIdUsed)
+
+            if (!userAztecWallet) return;
+
+            const addresses = await getContractAddressesAztec(11155111n)
+            const AztecWarpToadAddress = addresses.AztecWarpToad
+
+            const AztecWarpToad = await Contract.at(
+                AztecAddress.fromString(AztecWarpToadAddress),
+                WarpToadCoreContractArtifact,
+                userAztecWallet,
+            );
+
+            try {
+                setIsBridging(1);
+                const sponsoredFPC = await getSponsoredFPCInstance();
+                console.log("fpc shenanigans:)")
+                //@ts-ignore
+                await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+                const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+                const burnTx1 = await AztecWarpToad.methods.burn(noteData?.preImg.amount, noteData?.preImg.destination_chain_id, noteData?.preImg.secret, noteData?.preImg.nullifier_preimg).send({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: 60 * 10 })
+                console.log(burnTx1);
+                console.log("burn was a success!!")
+                setIsBridging(2);
+                downloadFile(noteData!)
+                saveNotes([
+                    {
+                        isAvailable: true,
+                        note: noteData!
+                    }
+                ])
+                //update balance
+                await fetchInputBalance(originTokenPick?.tokenAddress as `0x${string}`);
+                setNotes(loadNotes())
+            } catch (error) {
+                console.log(error)
+                setIsBridging(undefined)
+            }
+
         }
 
-        setIsBridging(0);
-
-        const decimals = await readContract(config, {
-            abi: erc20Abi,
-            address: originTokenPick.tokenAddress as `0x${string}`,
-            functionName: "decimals",
-        }) as number;
-
-        const amount = BigInt(tokenAInput * 10 ** decimals)
-
-        const noteData = await createPreCommitment(amount, aztecChainID)
-
-        console.log(noteData)
-
-        if (!noteData) return
-
-        const txHashWrap = await writeContract(config, {
-            abi: warptoadAbi,
-            address: l1Addresses["L1WarpToadModule#L1WarpToad"] as `0x${string}`,
-            functionName: "wrap",
-            args: [amount],
-        })
-
-        console.log("submitted:", txHashWrap)
-
-        // Wait until mined
-        const receipt = await waitForTransactionReceipt(config, {
-            hash: txHashWrap,
-        })
-
-        console.log("confirmed:", receipt)
-        setIsBridging(1);
-
-        const txHashBurn = await writeContract(config, {
-            abi: L1WarpToad__factory.abi,
-            address: l1Addresses["L1WarpToadModule#L1WarpToad"] as `0x${string}`,
-            functionName: "burn",
-            args: [noteData?.preCommitment!, amount]
-        })
-
-        console.log("submitted:", txHashBurn)
-
-        // Wait until mined
-        const receiptBurn = await waitForTransactionReceipt(config, {
-            hash: txHashBurn,
-        })
-
-        console.log("confirmed:", receiptBurn)
-
-        setIsBridging(2);
-        downloadFile(noteData);
-        setNotes(prev => [...prev, noteData]);
 
 
-        //TODO STORE IN LOCALSTORAGE
-
-        //update balance
-        await fetchErc20Balance(originTokenPick?.tokenAddress as `0x${string}`);
 
     }
 
-    async function handleMintOnL2(currentNote: WarptoadNote) {
-        //check if any notes in local storag at all, if no then let user upload
+    function hashNullifier(nullifierPreimage: bigint) {
+        return poseidon1([nullifierPreimage]);
+    }
+
+    function hashPreCommitment(nullifierPreimage: bigint, secret: bigint, chainId: bigint) {
+        return poseidon3([nullifierPreimage, secret, chainId]);
+    }
+
+
+
+    async function handleWithdraw(currentNote: WarptoadNoteStorageEntry, currentNoteIndex: number) {
+
+        if (!currentNote) {
+            console.log("no note has been supplied");
+            return;
+        }
+
+
+        if (!userAztecWallet) return;
+
+        const isEvmWithdraw = chainIdToString(currentNote.note.preImg.destination_chain_id) !== "Aztec";
+
+        console.log(isEvmWithdraw)
+
+
+        if (isEvmWithdraw) {
+
+            const currentNoteDeployments = evmDeployments[Number(currentNote.note.preImg.destination_chain_id)]
+            const sepoliaProvider = new JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
+            const scrollProvider = new JsonRpcProvider("https://scroll-sepolia.publicnode.com");
+            const gigaBridge = GigaBridge__factory.connect(evmDeployments[11155111]["L1InfraModule#GigaBridge"], sepoliaProvider);
+            const L1WarpToad = WarpToadCore__factory.connect(evmDeployments[11155111]["L1InfraModule#L1WarpToad"], signer);
+            const ScrollWarpToad = L2WarpToad__factory.connect(currentNoteDeployments["L2ScrollModule#L2WarpToad"], scrollProvider)
+
+            const addresses = await getContractAddressesAztec(11155111n)
+            const AztecWarpToadAddress = addresses.AztecWarpToad
+
+            const AztecWarpToad = await Contract.at(
+                AztecAddress.fromString(AztecWarpToadAddress),
+                WarpToadCoreContractArtifact,
+                userAztecWallet,
+            );
+
+            const AztecWarpToadWithSender: WarpToadCoreContract = AztecWarpToad.withWallet(userAztecWallet) as WarpToadCoreContract;
+
+
+            console.log("EVM TX")
+            console.log("Starting Withdraw")
+
+            // relayer fee logic
+            const priorityFee = 100000000n;// in wei (this is 0.1 gwei)
+            const maxFee = 5n * 10n ** 18n;   // i don't want to pay no more than 5 usdc okay cool thanks
+            const ethPriceInToken = 1700.34 // how much tokens you need to buy 1 eth. In this case 1700 usdc tokens to buy 1 eth. Cheap!
+            // L1 evm estimate. re-estimating this on every tx will require you to make a zk proof twice so i hardcoded. You should get a up to date value for L2's with alternative gas pricing from backend/scripts/dev_op/estimateGas.ts
+            const gasCost = Number(gasCostPerChain[11155111])
+            const relayerBonusFactor = 1.1 // 10% earnings on gas fees! 
+            const feeFactor = calculateFeeFactor(ethPriceInToken, gasCost, relayerBonusFactor);
+            console.log("gen proof inputs")
+
+            const proofInputs = await getProofInputs(
+                gigaBridge,
+                ScrollWarpToad,
+                AztecWarpToadWithSender,
+                currentNote.note.preImg.amount,
+                feeFactor,
+                priorityFee,
+                maxFee,
+                userEVMAddress!,
+                userEVMAddress!,
+                currentNote.note.preImg.nullifier_preimg,
+                currentNote.note.preImg.secret,
+            )
+
+            console.log(proofInputs)
+
+        }
+
+        //IF SUCCESS THEN DO THIS
+        updateNoteByIndex(currentNoteIndex);
+        setNotes(loadNotes());
+
+        /*
+        //check if any notes in local storage at all, if no then let user upload
         if (!currentNote) {
             console.log("no note has been supplied");
             return;
@@ -357,6 +507,10 @@ function Home() {
         const l1WarptoadContract = L1WarpToad__factory.connect(l1Addresses["L1InfraModule#L1WarpToad"], signer);
 
         const commitment = hashCommitment(currentNote.preCommitment, currentNote.preImg.amount);
+
+        console.log(commitment)
+        console.log(gigaBridge)
+
 
         const aztecMerkleData = await getMerkleData(gigaBridge, l1WarptoadContract, AztecWarpToad as WarpToadCoreContract, commitment)
 
@@ -385,6 +539,8 @@ function Home() {
         console.log(mintTx);
         const balanceRecipientPostMint = await AztecWarpToad.methods.balance_of(userAztecWallet.getAddress()).simulate()
         console.log("aztec balance after claim: " + balanceRecipientPostMint)
+        */
+
     }
 
     function showRemainingChainsForDestination() {
@@ -411,18 +567,31 @@ function Home() {
 
     async function checkAllowance() {
         if (!originTokenPick || !userEVMAddress) return
+        if (originChainPick?.chainType === "AZTEC") {
+            setAllowanceSet(true)
+            return
+        }
 
+        console.log(chainIdEvm)
+        console.log(evmDeployments[chainIdEvm as number][chainIdEvm === 11155111 ? "L1InfraModule#L1WarpToad" : "L2ScrollModule#L2WarpToad"])
+
+        if (chainIdEvm === 534351) {
+            setAllowanceSet(true);
+            return
+        }
         const tokenAAllowance = await readContract(config, {
             abi: erc20Abi,
             address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "allowance",
-            args: [userEVMAddress, l1Addresses["L1InfraModule#L1WarpToad"] as `0x${string}`],
+            args: [userEVMAddress, evmDeployments[chainIdEvm as number][chainIdEvm === 11155111 ? "L1InfraModule#L1WarpToad" : "L2ScrollModule#L2WarpToad"] as `0x${string}`],
+            chainId: chainIdEvm as 11155111 | 534351 | undefined
         }) as bigint;
 
         const decimals = await readContract(config, {
             abi: erc20Abi,
             address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "decimals",
+            chainId: chainIdEvm as 11155111 | 534351 | undefined
         }) as number;
 
         const parsedAmount = tokenAInput * 10 ** decimals;
@@ -436,6 +605,7 @@ function Home() {
             abi: erc20Abi,
             address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "decimals",
+            chainId: chainIdEvm as 11155111 | 534351 | undefined
         }) as number;
 
         const parsedAmount = tokenAInput * 10 ** decimals;
@@ -445,29 +615,13 @@ function Home() {
             abi: erc20Abi,
             address: originTokenPick.tokenAddress as `0x${string}`,
             functionName: "approve",
-            args: [l1Addresses["L1InfraModule#L1WarpToad"] as `0x${string}`, BigInt(parsedAmount)],
+            args: [evmDeployments[chainIdEvm as number]["L1InfraModule#L1WarpToad"] as `0x${string}`, BigInt(parsedAmount)],
+            chainId: chainIdEvm as 11155111 | 534351 | undefined
         })
         await waitForTransactionReceipt(config, {
             hash: txHash,
         })
         await checkAllowance()
-    }
-
-    const handleClick = async (tokenInfo: any) => {
-        await handleSelectOfferToken(tokenInfo);
-        setActiveToken(tokenInfo.tokenAddress);
-    };
-
-
-    async function fetchConnectedTokens(address: string) {
-        try {
-            const res = await fetch(import.meta.env.VITE_API_URL + "/getAllTokenPairs/" + address)
-            const data: connectedTokenInfo[] = await res.json();
-            setconnectedTokenInfo(data);
-
-        } catch (error) {
-            console.log(error);
-        }
     }
 
     //@ts-ignore
@@ -494,8 +648,8 @@ function Home() {
         if (!originTokenPick) {
             return
         }
-        fetchErc20Balance(originTokenPick?.tokenAddress as `0x${string}`);
-    }, [originTokenPick])
+        fetchInputBalance(originTokenPick?.tokenAddress as `0x${string}`);
+    }, [originTokenPick, isSwapped])
 
 
     async function switchChainPickDirection() {
@@ -540,30 +694,63 @@ function Home() {
         setTokenAInputRaw((tokenABalance / 2).toString())
     }
 
-    async function fetchErc20Balance(erc20Address: `0x${string}`) {
-        if (!userEVMAddress) {
-            return 0;
+    async function fetchInputBalance(erc20Address: `0x${string}`) {
+        if (originChainPick?.chainType === "EVM") {
+            if (!userEVMAddress) {
+                return 0;
+            }
+            try {
+                // 1. read decimals
+                const decimals = await readContract(config, {
+                    abi: erc20Abi,
+                    address: erc20Address,
+                    functionName: "decimals",
+                }) as number;
+
+                // 2. read balance
+                const erc20Balance = await readContract(config, {
+                    abi: erc20Abi,
+                    address: erc20Address,
+                    functionName: "balanceOf",
+                    args: [userEVMAddress],
+                }) as bigint;
+
+                // 3. format with correct decimals
+                const formatted = formatUnits(erc20Balance, decimals);
+
+                setTokenABalance(Number(formatted));
+
+            } catch (error) {
+                console.log(error)
+                setTokenABalance(0);
+            }
         }
 
-        // 1. read decimals
-        const decimals = await readContract(config, {
-            abi: erc20Abi,
-            address: erc20Address,
-            functionName: "decimals",
-        }) as number;
+        if (originChainPick?.chainType === "AZTEC") {
+            if (!userAztecWallet) {
+                return 0;
+            }
 
-        // 2. read balance
-        const erc20Balance = await readContract(config, {
-            abi: erc20Abi,
-            address: erc20Address,
-            functionName: "balanceOf",
-            args: [userEVMAddress],
-        }) as bigint;
+            // 1. read decimals
+            const decimals = 18
 
-        // 3. format with correct decimals
-        const formatted = formatUnits(erc20Balance, decimals);
 
-        setTokenABalance(Number(formatted));
+            const addresses = await getContractAddressesAztec(11155111n)
+            const AztecWarpToadAddress = addresses.AztecWarpToad
+
+            const AztecWarpToad = await Contract.at(
+                AztecAddress.fromString(AztecWarpToadAddress),
+                WarpToadCoreContractArtifact,
+                userAztecWallet,
+            );
+
+            const tokenbalance = await AztecWarpToad.methods.balance_of(userAztecWallet.getAddress()).simulate();
+
+            // 3. format with correct decimals
+            const formatted = formatUnits(tokenbalance, decimals);
+
+            setTokenABalance(Number(formatted));
+        }
     }
 
     const handleTokenAInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -573,27 +760,6 @@ function Home() {
         setTokenAInputRaw(e.target.value);
     };
 
-    const handleTokenBInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let v = e.target.value.replace(",", ".");
-        if (!/^\d*(?:\.\d{0,18})?$/.test(v)) return;
-        setTokenBInput(v === "" ? 0 : Number(v));
-        setTokenBInputRaw(e.target.value);
-    };
-
-    async function handleSelectOfferToken(currentTokenInfo: tokenInfo) {
-
-        setTokenAInfo(currentTokenInfo);
-        setTokenBInfo(null);
-        await fetchConnectedTokens(currentTokenInfo.tokenAddress);
-
-    }
-
-    const isValidRecipient =
-        offerRecipient !== "" &&
-        isAddress(offerRecipient) &&
-        getAddress(offerRecipient) !== ZERO_ADDR;
-
-    const privateChecks = isPrivateOffer && isValidRecipient || !isPrivateOffer;
 
 
     return (
@@ -877,14 +1043,14 @@ function Home() {
                                     </div>
 
                                     <div className="w-full gap-2 flex">
-                                        {allowanceSet ? (
+                                        {allowanceSet || (originChainPick?.chainType === "AZTEC") ? (
                                             <button onClick={async () => {
-                                                await handleBridgeOnL1();
-                                            }} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0 || !originChainPick || !destinationChainPick}>
+                                                await handleDeposit();
+                                            }} className="btn btn-secondary flex-grow" disabled={tokenAInput <= 0 || !originChainPick || !destinationChainPick}>
                                                 Start Bridge
                                             </button>
                                         ) : (
-                                            <button onClick={setAllowance} className="btn btn-secondary flex-grow" disabled={!privateChecks || tokenAInput <= 0}>
+                                            <button onClick={setAllowance} className="btn btn-secondary flex-grow" disabled={tokenAInput <= 0}>
                                                 Approve First
                                             </button>
                                         )}
@@ -895,18 +1061,45 @@ function Home() {
                                 <div className="md:w-1/3 border rounded-2xl flex flex-col items-center p-2 gap-2">
                                     <div className="flex w-full h-full justify-around gap-2 flex-grow flex-col relative">
                                         {
-                                            notes.map((note, i) => (
-                                                <div key={i}
-                                                    onClick={async () => {
-                                                        await handleMintOnL2(note)
-                                                    }}
-                                                    className="border rounded text-center p-2">{note.preImg.amount.toString()}</div>
-                                            ))
+                                            (notes.length >= 1) ? (
+                                                <>
+                                                    {notes.map((note, i) => (
+                                                        <div key={i}
+                                                            className={`border rounded text-center p-2 flex gap-2 justify-between items-center ${note.isAvailable ? "" : "bg-error/50"}`}>
+                                                            <div className="flex gap-2 justify-center items-center">
+                                                                <img src={`/chains/${chainIdToString(note.note.preImg.destination_chain_id).toLowerCase()}.png`} alt="" className="h-10" />
+                                                                <div className="flex flex-col text-start">
+                                                                    <p className="font-bold">
+                                                                        {chainIdToString(note.note.preImg.destination_chain_id)}
+                                                                    </p>
+                                                                    {parseTokenWithdrawAmount(note.note.preImg.amount, note.note.preImg.destination_chain_id)} USDC
+                                                                </div>
+                                                            </div>
+                                                            <button className="btn btn-secondary"
+                                                                disabled={!note.isAvailable}
+                                                                onClick={async () => {
+                                                                    await handleWithdraw(note, i)
+                                                                }}
+                                                            >{note.isAvailable ? "withdraw" : "redeemed"}</button>
+                                                        </div>
+                                                    )
+                                                    )
+                                                    }
+                                                </>
+                                            ) : (
+                                                <div className="w-full text-center">
+                                                    <p>no withdrawals in storage</p>
+                                                </div>
+                                            )
                                         }
+                                        <NoteInput
+                                            onImported={(notes) => {
+                                                setNotes(notes);
+                                            }}
+                                        />
                                     </div>
                                 </div>
                             )}
-
                         </div>
                     ) : (
                         <div className="border rounded-2xl flex flex-col items-center p-8">

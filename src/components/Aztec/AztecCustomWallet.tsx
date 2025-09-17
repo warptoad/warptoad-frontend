@@ -10,9 +10,9 @@ const shorten = (input?: string | null) => {
 
 
 function AztecCustomWallet() {
-    const { wallet, address, connect, disconnect, createRandomPrivKey, isLoading } = useAztecWallet();
-    const [hover, setHover] = useState(false);
+    const { wallet, address, connect, disconnect, createRandomPrivKey, isLoading, testMint } = useAztecWallet();
     const [privateKey, setPrivateKey] = useState<`0x${string}` | "">("");
+
 
     async function connectWallet() {
         if (!privateKey) return
@@ -24,15 +24,32 @@ function AztecCustomWallet() {
     }
 
     return wallet ? (
-        <button
-            className="btn btn-secondary"
-            onClick={disconnect}
-            onMouseEnter={() => setHover(true)}
-            onMouseLeave={() => setHover(false)}
-            title="Disconnect"
-        >
-            {hover ? "Disconnect" : shorten(address)}
-        </button>
+        <>
+            <button
+                className="btn btn-secondary btn-outline"
+                onClick={async ()=>{
+                    if(!address) return;
+                    await navigator.clipboard.writeText(address);
+                }}
+                title="copy address"
+            >
+                {shorten(address)}
+            </button>
+            <button
+                className="btn btn-secondary btn-outline"
+                onClick={testMint}
+                title="Disconnect"
+            >
+                Mint Test Token
+            </button>
+            <button
+                className="btn btn-secondary"
+                onClick={disconnect}
+                title="Disconnect"
+            >
+                Disconnect
+            </button>
+        </>
     ) : (
         <>
             <button

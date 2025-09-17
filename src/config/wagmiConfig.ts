@@ -10,11 +10,11 @@ export const config = createConfig({
     }),],
   chains: [
     sepolia, 
-    //scrollSepolia 
+    scrollSepolia 
   ],
   transports: {
     [sepolia.id]: http(),
-    //[scrollSepolia.id]: http(),
+    [scrollSepolia.id]: http(),
   },
   ssr: true,
 });
