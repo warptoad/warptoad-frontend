@@ -426,8 +426,6 @@ function Home() {
 
         const isEvmWithdraw = chainIdToString(currentNote.note.preImg.destination_chain_id) !== "Aztec";
 
-        console.log(isEvmWithdraw)
-
 
         if (isEvmWithdraw) {
 
@@ -479,11 +477,73 @@ function Home() {
 
             console.log(proofInputs)
 
+        } else {
+            if (!pxe) return
+            console.log("we are on aztec withdraw")
+
+            const commitment1 = hashCommitment(currentNote.note.preCommitment, currentNote.note.preImg.amount)
+            console.log("NOTE IS:", currentNote.note.preImg.destination_chain_id)
+            const currentNoteDeployments = evmDeployments[Number(currentNote.note.preImg.destination_chain_id)]
+
+            console.log(currentNoteDeployments)
+            const sepoliaProvider = new JsonRpcProvider("https://ethereum-sepolia-rpc.publicnode.com");
+            const scrollProvider = new JsonRpcProvider("https://scroll-sepolia.publicnode.com");
+            const gigaBridge = GigaBridge__factory.connect(evmDeployments[11155111]["L1InfraModule#GigaBridge"], sepoliaProvider);
+            const L1WarpToad = WarpToadCore__factory.connect(evmDeployments[11155111]["L1InfraModule#L1WarpToad"], signer);
+            const ScrollWarpToad = L2WarpToad__factory.connect(evmDeployments[534351]["L2ScrollModule#L2WarpToad"], scrollProvider)
+
+
+            const addresses = await getContractAddressesAztec(11155111n)
+            const AztecWarpToadAddress = addresses.AztecWarpToad
+
+            const AztecWarpToad = await Contract.at(
+                AztecAddress.fromString(AztecWarpToadAddress),
+                WarpToadCoreContractArtifact,
+                userAztecWallet,
+            );
+
+            const aztecMerkleData = await getMerkleData(gigaBridge, ScrollWarpToad, AztecWarpToad as WarpToadCore | WarpToadCoreContract, commitment1)
+
+            const balanceRecipientPreMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate()
+
+            console.log("BALANCE PRE CLAIM: ", balanceRecipientPreMint)
+
+            const sponsoredFPC = await getSponsoredFPCInstance();
+            await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+            const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+
+            try {
+
+                const mintTx = await AztecWarpToad.methods.mint_giga_root_evm(
+                    currentNote.note.preImg.amount,
+                    currentNote.note.preImg.secret,
+                    currentNote.note.preImg.nullifier_preimg,
+                    userAztecWallet.getAddress(),
+                    aztecMerkleData.blockNumber,
+                    aztecMerkleData.originLocalRoot,
+                    aztecMerkleData.gigaMerkleData as any, // no way i am gonna spend time getting this type right >:(
+                    aztecMerkleData.evmMerkleData as any,
+                ).send({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({
+                    timeout: 60 * 10 * 1
+                })
+
+                console.log("TX: ", mintTx)
+                const balanceRecipientPostMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate()
+
+                console.log("BALANCE POST CLAIM: ", balanceRecipientPostMint)
+                updateNoteByIndex(currentNoteIndex);
+                setNotes(loadNotes());
+
+            } catch (error) {
+                console.log("it shat its pants");
+                console.log(error)
+            }
+
         }
 
         //IF SUCCESS THEN DO THIS
-        updateNoteByIndex(currentNoteIndex);
-        setNotes(loadNotes());
+        //updateNoteByIndex(currentNoteIndex);
+        //setNotes(loadNotes());
 
         /*
         //check if any notes in local storage at all, if no then let user upload
