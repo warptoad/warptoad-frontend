@@ -6,7 +6,7 @@ type AzguardContextValue = {
   isInstalled: boolean;
   isConnected: () => boolean;
   address: string | null;
-  wallet: Wallet | null;
+  wallet: AztecWallet | null;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
 };
@@ -14,7 +14,7 @@ type AzguardContextValue = {
 const AzguardContext = createContext<AzguardContextValue | null>(null);
 
 export function AzguardProvider({ children }: { children: React.ReactNode }) {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [wallet, setWallet] = useState<AztecWallet | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const initOnceRef = useRef(false);

@@ -30,7 +30,7 @@ function Navbar() {
 
     return (
         <>
-            <div className="navbar">
+            <div className="navbar bg-base-300/50">
                 <div className="navbar-start">
                     <NavLink to="/" className="btn btn-primary text-xl">
                         <img src={logo} alt="Warptoad Logo" className="w-12" />

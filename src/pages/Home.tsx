@@ -853,9 +853,9 @@ function Home() {
                                 >withdraw</button>
                             </div>
                             {isDeposit ? (
-                                <div className="md:w-1/3 border rounded-2xl flex flex-col items-center p-2 gap-2">
+                                <div className="md:w-1/3 bg-base-100 border rounded-2xl flex flex-col items-center p-2 gap-2">
                                     <div className="flex w-full justify-around gap-2 flex-grow flex-col relative">
-                                        <div className="border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
+                                        <div className="bg-base-200 border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
                                             <div className="flex gap-2 items-center justify-between">
                                                 <p className="font-black">
                                                     Origin
@@ -939,7 +939,7 @@ function Home() {
                                         <button onClick={switchChainPickDirection} className="btn btn-secondary btn-circle absolute justify-self-center self-center hover:rotate-180 transition-transform duration-400">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="1.5rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevrons-down-icon lucide-chevrons-down"><path d="m7 6 5 5 5-5" /><path d="m7 13 5 5 5-5" /></svg>
                                         </button>
-                                        <div className="border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
+                                        <div className="bg-base-200 border rounded-2xl flex-1/3 p-2 flex flex-col gap-2 justify-between">
                                             <div className="flex gap-2 items-center justify-between">
                                                 <p className="font-black basis-1/2">
                                                     Destination
