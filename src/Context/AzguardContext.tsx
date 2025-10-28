@@ -1,12 +1,12 @@
-// AzguardContext.tsx
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { AzguardClient } from "@azguardwallet/client";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { AztecWallet } from "@azguardwallet/aztec-wallet";
+import type { Wallet } from "@aztec/aztec.js";
 
 type AzguardContextValue = {
   isInstalled: boolean;
-  isConnected: boolean;
+  isConnected: () => boolean;
   address: string | null;
-  client: AzguardClient | null;
+  wallet: Wallet | null;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
 };
@@ -14,102 +14,84 @@ type AzguardContextValue = {
 const AzguardContext = createContext<AzguardContextValue | null>(null);
 
 export function AzguardProvider({ children }: { children: React.ReactNode }) {
-  const clientRef = useRef<AzguardClient | null>(null);
-  const initOnceRef = useRef(false); // guard against React 18 StrictMode double-invoke in dev
-
+  const [wallet, setWallet] = useState<Wallet | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
+  const initOnceRef = useRef(false);
 
   useEffect(() => {
-    if (initOnceRef.current) return;
+    setIsInstalled(!!window.azguard);
+  }, []);
+
+  //auto reconnect session if exists
+  useEffect(() => {
+    if (!isInstalled || initOnceRef.current) return;
     initOnceRef.current = true;
 
-    let removeHandlers: Array<() => void> = [];
-
     (async () => {
-      const installed = await AzguardClient.isAzguardInstalled();
-      setIsInstalled(installed);
-      if (!installed) return;
+      try {
+        // The SDK will silently reconnect if a session exists
+        const existingWallet = await AztecWallet.connect(
+          {
+            name: "Warptoad",
+            description: "Warptoad — Cross-Chain Privacy Token Standard",
+            logo: "https://warptoad.org/assets/WarptoadLogo.svg",
+            url: "https://warptoad.xyz/",
+          },
+          "sandbox" // or mainnet/CAIP string
+        );
 
-      const client = await AzguardClient.create();
-      clientRef.current = client;
-
-      // initial snapshot
-      setIsConnected(client.connected);
-      setAddress(client.accounts?.[0] ?? null);
-
-      // disconnected
-      const onDisconnected = () => {
-        setIsConnected(false);
-        setAddress(null);
-      };
-      client.onDisconnected.addHandler(onDisconnected);
-      removeHandlers.push(() => client.onDisconnected.removeHandler(onDisconnected));
-
-      // optional: if SDK exposes account/connected events, wire them similarly
-      if (client.onAccountsChanged?.addHandler) {
-        const onAccountsChanged = (accounts: string[]) => setAddress(accounts?.[0] ?? null);
-        client.onAccountsChanged.addHandler(onAccountsChanged);
-        removeHandlers.push(() => client.onAccountsChanged.removeHandler(onAccountsChanged));
-      }
-
-      
-      if (client.onConnected?.addHandler) {
-        const onConnected = () => setIsConnected(true);
-        client.onConnected.addHandler(onConnected);
-        removeHandlers.push(() => client.onConnected.removeHandler(onConnected));
+        setWallet(existingWallet);
+        setAddress(existingWallet.getAddress().toString());
+      } catch (err) {
+        console.debug("No existing Azguard session:", err);
       }
     })();
-
-    return () => {
-      for (const rm of removeHandlers) {
-        try { rm(); } catch {}
-      }
-    };
-  }, []);
-
-  const connect = useCallback(async () => {
-    if (!isInstalled) return;
-    const client = clientRef.current ?? (await AzguardClient.create());
-    clientRef.current = client;
-
-    if (!client.connected) {
-      await client.connect(
-        { name: "Warptoad" },
-        [
-          {
-            chains: ["aztec:11155111"],
-            methods: ["send_transaction", "add_private_authwit", "call"],
-          },
-        ],
-      );
-    }
-    setIsConnected(client.connected);
-    setAddress(client.accounts?.[0] ?? null);
   }, [isInstalled]);
 
-  const disconnect = useCallback(async () => {
-    const client = clientRef.current;
-    if (!client) return;
-    if (typeof (client as any).disconnect === "function") {
-      await (client as any).disconnect(); // will trigger onDisconnected
-    } else {
-      setIsConnected(false);
-      setAddress(null);
-    }
-  }, []);
+  function isConnected() {
+    return !!wallet && wallet.connected;
+  }
+
+  async function connect() {
+    if (!isInstalled) return;
+    if (wallet) return;
+
+    const newWallet = await AztecWallet.connect(
+      {
+        name: "Warptoad",
+        description: "Warptoad — Cross-Chain Privacy Token Standard",
+        logo: "https://warptoad.org/assets/WarptoadLogo.svg",
+        url: "https://warptoad.xyz/",
+      },
+      "sandbox"
+    );
+
+    setWallet(newWallet);
+    setAddress(newWallet.getAddress().toString());
+  }
+
+  async function disconnect() {
+    if (!wallet) return;
+    await wallet.disconnect();
+    setAddress(null);
+    setWallet(null);
+  }
 
   const value: AzguardContextValue = {
     isInstalled,
     isConnected,
     address,
-    client: clientRef.current,
+    wallet,
     connect,
     disconnect,
   };
 
-  return <AzguardContext.Provider value={value}>{children}</AzguardContext.Provider>;
+  return (
+    <AzguardContext.Provider value={value}>
+      {children}
+    </AzguardContext.Provider>
+  );
 }
 
 export function useAzguard() {

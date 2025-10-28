@@ -8,7 +8,7 @@ import { SPONSORED_FPC_SALT } from '@aztec/constants';
 import { getSchnorrAccount } from "@aztec/accounts/schnorr";
 import { ethers } from "ethers";
 import { deriveSigningKey } from "@aztec/stdlib/keys";
-import { Contract, getContractInstanceFromDeployParams } from '@aztec/aztec.js/contracts';
+import { Contract, ContractBase } from '@aztec/aztec.js/contracts';
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
 
 
@@ -154,6 +154,7 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
       console.warn('AZTEC wallet not connected');
       return;
     }
+    /*
 
     const addresses = await getContractAddressesAztec(11155111n)
     const AztecWarpToadAddress = addresses.AztecWarpToad
@@ -182,6 +183,8 @@ export function AztecWalletProvider({ children }: { children: React.ReactNode })
     }
     const usdcBalance = await AztecWarpToad.methods.balance_of(walletStore.getAddress()).simulate();
     console.log(usdcBalance)
+    */
+   console.log("minting")
 
   }
 

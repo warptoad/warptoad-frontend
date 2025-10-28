@@ -10,7 +10,7 @@ const shorten = (input?: string | null) => {
 
 
 function AzguardWallet() {
-    const { isInstalled, isConnected, address, connect, disconnect, client } = useAzguard();
+    const { isInstalled, isConnected, address, connect, disconnect, wallet } = useAzguard();
     const [hover, setHover] = useState(false);
     
     if (!isInstalled) {
@@ -29,7 +29,7 @@ function AzguardWallet() {
         );
     }
 
-    return isConnected ? (
+    return isConnected() ? (
         <button
             className="btn btn-secondary"
             onClick={disconnect}

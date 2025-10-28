@@ -20,14 +20,16 @@ import { aztecDeployments } from "@warp-toad/backend/deployment"
 import { getContractAddressesAztec, getContractAddressesEvm, evmDeployments, getSponsoredFPCInstance, getL2EvmContracts } from "@warp-toad/backend/deployment";
 import { calculateFeeFactor, getMerkleData, getProofInputs } from "@warp-toad/backend/proving";
 import { createPreCommitment, hashCommitment, loadNotes, saveNotes, updateNoteByIndex, type WarptoadNote, type WarptoadNoteStorageEntry } from "../components/utils/depositFunctionality";
-import { AzguardClient } from "@azguardwallet/client";
+
 import type { SimulateViewsResult } from "@azguardwallet/types";
-import { AztecAddress, Contract, Fr, SponsoredFeePaymentMethod } from "@aztec/aztec.js";
+import { AztecAddress, Contract, Fr, SponsoredFeePaymentMethod, type ContractInstanceWithAddress } from "@aztec/aztec.js";
 import { useEthersSigner } from "../hooks/useEthersSigner";
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC";
 import NoteInput from "../components/Input/NoteInput";
 import { gasCostPerChain } from "@warp-toad/backend/constants";
 import { poseidon1, poseidon3 } from "poseidon-lite";
+import { useAzguard } from "../Context/AzguardContext";
+import type { Key } from "react";
 
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as const;
@@ -164,13 +166,16 @@ const bridgeStates = ["wrapping", "bridging", "bridging successful!"]
 function Home() {
     const signer = useEthersSigner();
     const { address: userEVMAddress, isConnected, connector, chainId: chainIdEvm } = useAccount();
-    const { address: userAztecAddress, wallet: userAztecWallet, isConnected: aztecConnected, pxe, testMint } = useAztecWallet();
-
+    //const { address: userAztecAddress, wallet: userAztecWallet, isConnected: aztecConnected, pxe, testMint } = useAztecWallet();
+    const { isInstalled, isConnected: aztecConnected, address: userAztecAddress, connect, disconnect, wallet: userAztecWallet } = useAzguard();
     const originSelectionModal = useRef<HTMLDialogElement>(null);
     const destinationSelectionModal = useRef<HTMLDialogElement>(null);
     const destinationAddressModal = useRef<HTMLDialogElement>(null);
     const [createdSlug, setCreatedSlug] = useState<string | null>(null);
     const [isBridging, setIsBridging] = useState<number | undefined>(undefined);
+
+    const [sponsoredFPCContract, setSponsoredFPCContract] = useState<SponsoredFPCContract | null>(null)
+    const [sponsoredFPCInstance, setSponsoredFPC] = useState<ContractInstanceWithAddress | null>(null)
 
     const [isDeposit, setIsDeposit] = useState(true);
 
@@ -220,6 +225,16 @@ function Home() {
         }
 
     }
+
+    async function initSponsoredFPCContract() {
+        //const sponsoredFPC = await getSponsoredFPCInstance();
+        //setSponsoredFPC(sponsoredFPC);
+        //setSponsoredFPCContract(await SponsoredFPCContract.at(sponsoredFPC.address, userAztecWallet))
+    }
+
+    useEffect(() => {
+        initSponsoredFPCContract()
+    }, [userAztecWallet]);
 
     useEffect(() => {
         setNotes(loadNotes())
@@ -376,9 +391,9 @@ function Home() {
                 const sponsoredFPC = await getSponsoredFPCInstance();
                 console.log("fpc shenanigans:)")
                 //@ts-ignore
-                await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+                //await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
                 const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
-                const burnTx1 = await AztecWarpToad.methods.burn(noteData?.preImg.amount, noteData?.preImg.destination_chain_id, noteData?.preImg.secret, noteData?.preImg.nullifier_preimg).send({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: 60 * 10 })
+                const burnTx1 = await AztecWarpToad.methods.burn(noteData?.preImg.amount, noteData?.preImg.destination_chain_id, noteData?.preImg.secret, noteData?.preImg.nullifier_preimg).send({ from: sponsoredFPC.address, fee: { paymentMethod: sponsoredPaymentMethod } }).wait({ timeout: 60 * 10 })
                 console.log(burnTx1);
                 console.log("burn was a success!!")
                 setIsBridging(2);
@@ -445,7 +460,8 @@ function Home() {
                 userAztecWallet,
             );
 
-            const AztecWarpToadWithSender: WarpToadCoreContract = AztecWarpToad.withWallet(userAztecWallet) as WarpToadCoreContract;
+            //idk why you have to do this stinky sorcery
+            const AztecWarpToadWithSender: WarpToadCoreContract = AztecWarpToad.withWallet(userAztecWallet) as unknown as WarpToadCoreContract;
 
 
             console.log("EVM TX")
@@ -478,7 +494,7 @@ function Home() {
             console.log(proofInputs)
 
         } else {
-            if (!pxe) return
+            //if (!pxe) return
             console.log("we are on aztec withdraw")
 
             const commitment1 = hashCommitment(currentNote.note.preCommitment, currentNote.note.preImg.amount)
@@ -502,14 +518,14 @@ function Home() {
                 userAztecWallet,
             );
 
-            const aztecMerkleData = await getMerkleData(gigaBridge, ScrollWarpToad, AztecWarpToad as WarpToadCore | WarpToadCoreContract, commitment1)
+            const aztecMerkleData = await getMerkleData(gigaBridge, ScrollWarpToad, AztecWarpToad as unknown as WarpToadCore | WarpToadCoreContract, commitment1)
 
-            const balanceRecipientPreMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate()
+            const balanceRecipientPreMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate({ from: await userAztecWallet.getAddress() })
 
             console.log("BALANCE PRE CLAIM: ", balanceRecipientPreMint)
 
             const sponsoredFPC = await getSponsoredFPCInstance();
-            await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
+            //await pxe.registerContract({ instance: sponsoredFPC, artifact: SponsoredFPCContract.artifact });
             const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
             try {
@@ -523,12 +539,12 @@ function Home() {
                     aztecMerkleData.originLocalRoot,
                     aztecMerkleData.gigaMerkleData as any, // no way i am gonna spend time getting this type right >:(
                     aztecMerkleData.evmMerkleData as any,
-                ).send({ fee: { paymentMethod: sponsoredPaymentMethod } }).wait({
+                ).send({ from: sponsoredFPC.address, fee: { paymentMethod: sponsoredPaymentMethod } }).wait({
                     timeout: 60 * 10 * 1
                 })
 
                 console.log("TX: ", mintTx)
-                const balanceRecipientPostMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate()
+                const balanceRecipientPostMint = await AztecWarpToad.methods.balance_of(await userAztecWallet.getAddress()).simulate({ from: await userAztecWallet.getAddress() })
 
                 console.log("BALANCE POST CLAIM: ", balanceRecipientPostMint)
                 updateNoteByIndex(currentNoteIndex);
@@ -804,7 +820,7 @@ function Home() {
                 userAztecWallet,
             );
 
-            const tokenbalance = await AztecWarpToad.methods.balance_of(userAztecWallet.getAddress()).simulate();
+            const tokenbalance = await AztecWarpToad.methods.balance_of(userAztecWallet.getAddress()).simulate({ from: userAztecWallet.getAddress() });
 
             // 3. format with correct decimals
             const formatted = formatUnits(tokenbalance, decimals);
@@ -1028,7 +1044,7 @@ function Home() {
                                                                         {
                                                                             (originTokenSelection && originChainPick) ? (
 
-                                                                                originTokenSelection.map((token) => (
+                                                                                originTokenSelection.map((token: TokenInfo) => (
                                                                                     <button
                                                                                         onClick={() => {
                                                                                             setOriginTokenPick(token);
@@ -1123,7 +1139,7 @@ function Home() {
                                         {
                                             (notes.length >= 1) ? (
                                                 <>
-                                                    {notes.map((note, i) => (
+                                                    {notes.map((note: WarptoadNoteStorageEntry, i: any) => (
                                                         <div key={i}
                                                             className={`border rounded text-center p-2 flex gap-2 justify-between items-center ${note.isAvailable ? "" : "bg-error/50"}`}>
                                                             <div className="flex gap-2 justify-center items-center">

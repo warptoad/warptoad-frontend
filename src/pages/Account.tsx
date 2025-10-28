@@ -6,6 +6,7 @@ import { waitForTransactionReceipt, writeContract } from "@wagmi/core";
 import { config } from "../config/wagmiConfig";
 import { evmDeployments } from "@warp-toad/backend/deployment";
 import { WarpToadCore__factory } from "@warp-toad/backend/ethers/typechain-types";
+import AzguardWallet from "../components/Aztec/AzguardWallet";
 
 
 function Account() {
@@ -36,7 +37,8 @@ function Account() {
                     <div className="flex gap-2 p-2 items-center">
                         <div aria-label="status" className={`status status-xl ${isConnected ? "status-success" : "status-error"}`}></div>
                         <p className="btn btn-secondary">Aztec wallet</p>
-                        <AztecCustomWallet />
+                        {/*<AztecCustomWallet />*/}
+                        <AzguardWallet />
                     </div>
                 </div>
             </div>
